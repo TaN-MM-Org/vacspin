@@ -83,6 +83,11 @@ outside it.
 - **Remote entanglement** (`barrett_kok_success`,
   `entanglement_rate`): the two-photon heralding budget, with its
   intrinsic factor 1/2 stated as a ceiling no detector removes.
+- **Your sample, your numbers** (`fit_spin_parameters`,
+  `parameter_information`, `design_fields`): fit the spin parameters
+  of your own centre to your measured frequencies, with error bars --
+  and, before measuring, check whether the planned measurements can
+  determine those parameters at all.
 
 ## Cited parameters
 
@@ -105,9 +110,48 @@ For GeV-, PbV-, or your own sample, populate `SpinParameters` and
 `EmissionBudget` from your measurements or the literature; the
 provenance travels with every prediction.
 
+## Adapting it to your lab
+
+Every sample is different, so the numbers that describe your centre
+should come from your own measurements. The `lab` tools close that
+loop in the order a lab actually works -- plan first, then measure,
+then calibrate:
+
+```python
+import vacspin as vs
+
+p0 = vs.snv_rosenthal2023()                     # starting point
+
+# 1. Before measuring: can 6 planned points determine lam_g and ups_g,
+#    and how small would the error bars be at 0.05 GHz per point?
+kinds = ["qubit", "orbital_g"] * 3
+fields = [vs.field_on_circle(z, 0.15) for z in (20, 60, 100, 140, 160, 80)]
+info = vs.parameter_information(kinds, fields, p0,
+                                vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+print(info["identifiable"], info["sigma"])
+
+# 2. Or let the package pick the best subset of your candidate points:
+pick = vs.design_fields(kinds, fields, 4, p0, vary=("lam_g", "ups_g"))
+
+# 3. After measuring: fit, and get a ready-to-use parameter set whose
+#    `reference` records exactly where it came from.
+fit = vs.fit_spin_parameters(kinds, fields, measured_ghz, p0,
+                             vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+print(fit.values, fit.sigma)
+my_sample = fit.params            # use it anywhere in the package
+```
+
+A set of measurements that cannot tell the fitted parameters apart is
+refused with an explanation rather than silently answered -- the
+classic case being zero-field splittings alone, which can never
+separate the spin-orbit constant from strain because they only enter
+together as one number. Observation records travel in a plain CSV
+format (`save_observations_csv` / `load_observations_csv`) whose
+round trip is exact.
+
 ## How it is checked
 
-46 tests (Python 3.9-3.13, run in CI on every push), every claim
+56 tests (Python 3.9-3.13, run in CI on every push), every claim
 anchored to an exact result, a published measurement, or two
 independent code paths -- never a stored number. Highlights: exact
 Kramers doublets and the closed-form splitting against full
@@ -123,7 +167,11 @@ operating point (about 4 detected photons at 0.2% efficiency)
 reproduced; the source study's design point (Purcell factor ~19,
 end-to-end efficiency ~0.65, >98% fidelity at the optimal window,
 a >100x speedup over confocal readout) recovered end to end from its
-stated inputs; and inverse-tool round trips and refusals throughout.
+stated inputs; inverse-tool round trips and refusals throughout; and
+the lab-calibration tools checked four ways -- noiseless fits recover
+the truth, the exact linear case hits its textbook closed form, seeded
+Monte Carlo matches the reported error bars, and the non-identifiable
+zero-field design is refused via an exact rank argument.
 
 ## Honest limits
 

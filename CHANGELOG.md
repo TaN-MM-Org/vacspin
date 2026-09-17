@@ -4,6 +4,37 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## v0.2.0 - 2026-09-17
+
+Lab adaptability: plan, measure, calibrate -- fit the spin parameters
+of YOUR sample from YOUR measurements, with honest error bars, and
+know before spending beam time whether a planned experiment can
+determine them at all.
+
+- `lab.fit_spin_parameters`: fit any subset of the ten spin parameters
+  to measured qubit frequencies and orbital splittings versus field
+  (pure NumPy Levenberg-Marquardt), returning a ready-to-use
+  `SpinParameters` whose mandatory `reference` records the fit and the
+  base set, plus per-parameter error bars, the full covariance and a
+  chi-squared when measurement errors are supplied.
+- `lab.parameter_information`: the same (J^T W J) matrix before any
+  data exists -- predicted error bars for a planned design, and an
+  identifiability verdict instead of a surprise after the beam time.
+- `lab.design_fields`: greedy D-optimal selection of the most
+  informative subset of candidate observations (Pukelsheim, Optimal
+  Design of Experiments, SIAM (2006)), refusing candidate lists that
+  cannot identify the parameters.
+- `lab.save_observations_csv` / `load_observations_csv`: a plain,
+  checked CSV contract for observation records; round trips are exact.
+- Anchors: noiseless fits recover the cited SnV- truth to numerical
+  precision; the exact linear case (ups = 0 zero-field splitting) hits
+  the textbook sigma/sqrt(n) closed form; planner and fit covariance
+  agree as two code paths of one matrix; 400 seeded Monte Carlo
+  experiments match the reported error bars; the zero-field
+  lam-versus-ups degeneracy is refused via an exact rank argument; the
+  greedy design obeys the exact rank-one determinant identity and its
+  recomputed greedy rule.
+
 ## v0.1.0 - 2026-09-17
 
 First release: the general-purpose engine distilled from the
