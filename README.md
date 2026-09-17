@@ -1,7 +1,6 @@
 # vacspin
 
-[![tests](https://github.com/TaN-MM-Org/vacspin/actions/workflows/ci.yml/badge.svg)](https://github.com/TaN-MM-Org/vacspin/actions)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/vacspin)](https://pypi.org/project/vacspin/) [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22819698-blue)](https://doi.org/10.5281/zenodo.22819698) [![tests](https://github.com/TaN-MM-Org/vacspin/actions/workflows/ci.yml/badge.svg)](https://github.com/TaN-MM-Org/vacspin/actions)
 
 How well can a single trapped spin in diamond talk to light? A
 vacancy colour centre (SiV-, GeV-, SnV-, PbV-) holds one electron
@@ -173,4 +172,6 @@ notes.
 
 ## License
 
-Apache-2.0.
+Apache-2.0. Every release is archived on Zenodo under the concept DOI
+[10.5281/zenodo.22819698](https://doi.org/10.5281/zenodo.22819698),
+which always resolves to the latest version.
