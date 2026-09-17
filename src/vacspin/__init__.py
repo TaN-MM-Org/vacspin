@@ -27,8 +27,11 @@ from .readout import (fidelity, fidelity_threshold1, geometric_pmf,
                       poisson_pmf, polarization_rate, readout_counts,
                       required_efficiency, required_window)
 from .remote import barrett_kok_success, entanglement_rate
+from .lab import (SpinFit, design_fields, fit_spin_parameters,
+                  load_observations_csv, parameter_information,
+                  save_observations_csv)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014",
@@ -43,5 +46,7 @@ __all__ = [
     "geometric_pmf", "poisson_pmf", "fidelity", "required_efficiency",
     "required_window",
     "barrett_kok_success", "entanglement_rate",
+    "SpinFit", "fit_spin_parameters", "parameter_information",
+    "design_fields", "save_observations_csv", "load_observations_csv",
     "__version__",
 ]
