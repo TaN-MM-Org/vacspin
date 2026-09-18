@@ -105,8 +105,19 @@ No physical number is made up, and none is accepted without a source
   of Hepp et al., PRL 112, 036405 (2014). Strain and orbital
   quenching are sample-specific and deliberately not shipped; the
   reference string says so.
+- `gev_bhaskar2017()`: the measured GeV- splittings (152 and
+  981 GHz, zero-phonon line 602 nm) of Bhaskar et al., PRL 118,
+  223603 (2017), with the same deliberate omissions as SiV- --
+  strain and quenching are your sample's numbers, and `vacspin.lab`
+  exists to fit them.
 
-For GeV-, PbV-, or your own sample, populate `SpinParameters` and
+The lead-vacancy (PbV-) centre is documented but not shipped, on
+purpose: its ground splitting is measured (about 3900 GHz; Wang et
+al., ACS Photonics 8, 2947 (2021), confirmed in 2026), but no
+verified measured excited-state splitting was available, and this
+package does not ship half a parameter set.
+
+For PbV-, or your own sample of any centre, populate `SpinParameters` and
 `EmissionBudget` from your measurements or the literature; the
 provenance travels with every prediction.
 
@@ -151,7 +162,7 @@ round trip is exact.
 
 ## How it is checked
 
-56 tests (Python 3.9-3.13, run in CI on every push), every claim
+59 tests (Python 3.9-3.14 in CI on every push), every claim
 anchored to an exact result, a published measurement, or two
 independent code paths -- never a stored number. Highlights: exact
 Kramers doublets and the closed-form splitting against full

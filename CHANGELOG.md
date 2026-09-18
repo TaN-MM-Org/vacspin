@@ -4,6 +4,30 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## v0.3.0 - 2026-09-18
+
+The third measured centre, and a future-proofing pass.
+
+- `gev_bhaskar2017()`: the germanium-vacancy centre with its
+  measured unstrained orbital splittings -- 152 GHz ground, 981 GHz
+  excited, zero-phonon line 602 nm (Bhaskar et al., PRL 118, 223603
+  (2017)) -- shipping, as for SiV-, only what its source states:
+  strain and orbital quenching are sample-specific, deliberately
+  zero, and fittable from your own frequencies with `vacspin.lab`
+  (context: Siyushev et al., PRB 96, 081201(R) (2017) measured
+  170 GHz on a strained emitter; Senkalla et al., PRL 132, 026901
+  (2024) measured 24.1 ms coherence below 300 mK).
+- PbV- documented but not shipped, on purpose: the ground splitting
+  is measured (~3900 GHz; Wang et al., ACS Photonics 8, 2947 (2021),
+  confirmed by Chen et al., arXiv:2605.27841 (2026)), the excited
+  splitting is not -- and this package does not ship half a
+  parameter set.
+- CI now also runs on Python 3.14.
+- Anchors: GeV values locked to their source; the zero-strain
+  closed form Delta = lam exact for both manifolds through the full
+  solver; the dipole sum rule and the exact aligned-field
+  protection hold for the new centre.
+
 ## v0.2.0 - 2026-09-17
 
 Lab adaptability: plan, measure, calibrate -- fit the spin parameters
