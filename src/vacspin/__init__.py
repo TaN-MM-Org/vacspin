@@ -14,8 +14,8 @@ diamond nanocavity on thin-film lithium niobate" (submitted to Optics
 Express, 2026), and the effective-Hamiltonian and readout formalism of
 Rosenthal et al., PRX 13, 031022 (2023) and arXiv:2403.13110.
 """
-from .params import (EmissionBudget, SpinParameters, siv_hepp2014,
-                     snv_emission, snv_rosenthal2023)
+from .params import (EmissionBudget, SpinParameters, gev_bhaskar2017,
+                     siv_hepp2014, snv_emission, snv_rosenthal2023)
 from .hamiltonian import (GAMMA_GHZ_PER_T, h_manifold, lab_to_spin,
                           qubit_frequency, qubit_frequency_perpendicular,
                           solve, zero_field_splitting)
@@ -31,10 +31,10 @@ from .lab import (SpinFit, design_fields, fit_spin_parameters,
                   load_observations_csv, parameter_information,
                   save_observations_csv)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
-    "snv_emission", "siv_hepp2014",
+    "snv_emission", "siv_hepp2014", "gev_bhaskar2017",
     "GAMMA_GHZ_PER_T", "h_manifold", "lab_to_spin", "solve",
     "zero_field_splitting", "qubit_frequency",
     "qubit_frequency_perpendicular",

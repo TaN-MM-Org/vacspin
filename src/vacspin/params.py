@@ -24,7 +24,25 @@ without a source: both dataclasses refuse to exist without a
   string, and you supply your measured values for field-dependent
   work.
 
-For any other centre (GeV-, PbV-, or your own SnV sample), populate the
+* `gev_bhaskar2017`: the germanium-vacancy (GeV-) centre, measured
+  unstrained orbital splittings of M. K. Bhaskar et al., Phys. Rev.
+  Lett. 118, 223603 (2017) (arXiv:1612.03036): 152 GHz ground,
+  981 GHz excited, 602 nm zero-phonon line. As for SiV-, strain and
+  orbital quenching are sample-specific and deliberately NOT shipped
+  (Siyushev et al., PRB 96, 081201(R) (2017) measured 170 GHz on a
+  strained emitter -- about 20 GHz of transverse-strain contribution
+  -- which is exactly why); supply your measured values, or fit them
+  with `vacspin.lab`.
+
+The lead-vacancy (PbV-) centre is documented but NOT shipped, on
+purpose: its ground-state splitting is measured (about 3900 GHz;
+P. Wang et al., ACS Photonics 8, 2947 (2021), arXiv:2106.03413,
+confirmed by Chen et al., arXiv:2605.27841 (2026)), but no verified
+measured excited-state splitting was available to this package's
+maintainers, and this package does not ship half a parameter set.
+Populate `SpinParameters` yourself when your sample's numbers exist.
+
+For any other centre, or your own sample of any centre, populate the
 dataclasses from your measurements or the literature; the mandatory
 `reference` field keeps the provenance attached to every prediction.
 """
@@ -35,7 +53,7 @@ import dataclasses
 import numpy as np
 
 __all__ = ["SpinParameters", "EmissionBudget", "snv_rosenthal2023",
-           "snv_emission", "siv_hepp2014"]
+           "snv_emission", "siv_hepp2014", "gev_bhaskar2017"]
 
 
 def _check_ref(reference):
@@ -186,3 +204,32 @@ def siv_hepp2014(theta_rad=None, phi_rad=None) -> SpinParameters:
                   "splittings 50/260 GHz, ZPL 737 nm; strain and "
                   "orbital quenching deliberately not shipped (sample-"
                   "specific) -- supply measured values")
+
+
+def gev_bhaskar2017(theta_rad=None, phi_rad=None) -> SpinParameters:
+    """GeV- measured unstrained values of Bhaskar et al., PRL 118,
+    223603 (2017): orbital splittings 152 GHz (ground) and 981 GHz
+    (excited), zero-phonon line 602 nm. Strain and orbital quenching
+    are sample-specific and NOT shipped: this set carries ups = 0 and
+    f = delta = 0, stated here on purpose (Siyushev et al., PRB 96,
+    081201(R) (2017) measured 170 GHz on a strained emitter, about
+    20 GHz of it transverse strain) -- supply your measured values,
+    or fit them from your own frequencies with `vacspin.lab`. Default
+    orientation: the <111> axis of a (001)-oriented sample, exact
+    crystallography, overridable. Millisecond-scale coherence at
+    millikelvin temperatures is measured for this centre (Senkalla et
+    al., PRL 132, 026901 (2024): 24.1 ms CPMG below 300 mK)."""
+    if theta_rad is None:
+        theta_rad = float(np.arccos(1.0 / np.sqrt(3.0)))
+    if phi_rad is None:
+        phi_rad = float(np.pi / 4)
+    return SpinParameters(
+        lam_g=152.0, ups_g=0.0, lam_e=981.0, ups_e=0.0,
+        f_g=0.0, f_e=0.0, delta_g=0.0, delta_e=0.0,
+        theta_rad=theta_rad, phi_rad=phi_rad,
+        reference="Bhaskar et al., PRL 118, 223603 (2017): measured "
+                  "unstrained splittings 152/981 GHz, ZPL 602 nm; "
+                  "strain and orbital quenching deliberately not "
+                  "shipped (sample-specific; cf. Siyushev et al., "
+                  "PRB 96, 081201(R) (2017)) -- supply measured "
+                  "values")
