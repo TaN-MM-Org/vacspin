@@ -24,8 +24,9 @@ def test_purcell_formula_and_identity():
     F_C = 4 g^2 / (kappa gamma_rad,C) as an identity."""
     assert abs(purcell_max(4.0 * np.pi ** 2 / 3.0, 1.0) - 1.0) < 1e-12
     ci = _ci()
-    gamma_rad_c = BUD.gamma0 * BUD.radiative_fraction
-    f_from_g = 4.0 * ci.g_hz ** 2 / (ci.kappa_hz * gamma_rad_c)
+    # every rate in Hz: the radiative decay rate as a linewidth
+    gamma_rad_c_hz = BUD.gamma0 * BUD.radiative_fraction / (2.0 * np.pi)
+    f_from_g = 4.0 * ci.g_hz ** 2 / (ci.kappa_hz * gamma_rad_c_hz)
     assert abs(f_from_g - ci.f_c) < 1e-9 * ci.f_c
 
 
@@ -102,3 +103,20 @@ def test_partner_selectivity_reporting():
     ci = _ci(q=500.0, delta_partner_hz=2.097e12)
     assert ci.f_partner < ci.f_c
     assert ci.validity["partner_selectivity"] == (ci.kappa_hz < 2.097e12)
+
+
+def test_coupling_rate_in_consistent_hz_units():
+    """g_hz is a frequency in Hz like kappa_hz: computed in angular
+    units (kappa = 2 pi f_cav / Q_L, gamma = 1/tau in 1/s) and divided
+    by 2 pi. Before 0.3.1 the code multiplied kappa in Hz by gamma in
+    1/s, which made g_hz too large by sqrt(2 pi) and made the
+    weak-coupling check stricter than stated. The cooperativity is
+    unit-free and must equal F_C times the radiative fraction."""
+    ci = _ci()
+    a = BUD.radiative_fraction
+    kappa_ang = 2.0 * np.pi * ci.kappa_hz            # rad/s
+    gamma_rad_ang = BUD.gamma0 * a                   # 1/s
+    g_ang = 0.5 * np.sqrt(ci.f_c * kappa_ang * gamma_rad_ang)
+    assert abs(ci.g_hz - g_ang / (2.0 * np.pi)) < 1e-12 * ci.g_hz
+    assert abs(ci.cooperativity - ci.f_c * a) < 1e-12 * ci.cooperativity
+    assert ci.validity["weak_coupling"] == (ci.g_hz < ci.kappa_hz / 10.0)

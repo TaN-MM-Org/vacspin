@@ -140,3 +140,25 @@ def test_input_refusals():
         fidelity_threshold1(-1.0, 0.0)
     with pytest.raises(ValueError):
         required_efficiency(0.4, 100.0, GAMMA0, 1e-6)
+
+
+def test_readout_counts_refuses_negative_background():
+    """readout_counts refuses a negative leak or noise rate, as
+    fidelity does; before 0.3.1 it returned a negative dark count."""
+    with pytest.raises(ValueError, match="noise_rate"):
+        readout_counts(0.1, 100.0, GAMMA0, 1e-6, noise_rate=-1e6)
+    with pytest.raises(ValueError, match="leak"):
+        readout_counts(0.1, 100.0, GAMMA0, 1e-6, leak=-0.5)
+
+
+def test_non_finite_rates_and_windows_refused():
+    """An infinite window or a NaN rate is refused with a clear
+    message; before 0.3.1 fidelity returned NaN for tau = inf and an
+    unrelated integer-conversion error for gamma = NaN."""
+    for kw in (dict(tau=np.inf), dict(gamma=np.nan), dict(s=np.inf)):
+        args = dict(eta=0.1, lam=100.0, gamma=GAMMA0, tau=1e-6, s=1.0)
+        args.update(kw)
+        with pytest.raises(ValueError, match="finite"):
+            fidelity(**args)
+        with pytest.raises(ValueError, match="finite"):
+            readout_counts(**args)
