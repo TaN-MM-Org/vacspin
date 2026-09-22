@@ -2,7 +2,8 @@
 
 No physical number in this package is made up, and none is accepted
 without a source: both dataclasses refuse to exist without a
-`reference`. Two sets ship, and each ships only what its source states:
+`reference`. Three centres ship (SnV-, SiV-, GeV-), and each ships only
+what its source states:
 
 * `snv_rosenthal2023` / `snv_emission`: the negatively charged
   tin-vacancy (SnV-) centre in diamond, the device-fit values of

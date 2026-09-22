@@ -16,7 +16,10 @@ Lee et al., arXiv:2511.05740 (Eqs. 1-10) as used by Mahim et al.
     g     = (1/2) sqrt(F_C kappa gamma_rad,C)      coupling rate, so that
             F_C = 4 g^2 / (kappa gamma_rad,C) holds as an identity
 
-with V in units of (lam/n)^3 and kappa = f_cav / Q_L. `xi_pol_overlap`
+with V in units of (lam/n)^3 and kappa = f_cav / Q_L. In the g formula
+all three rates are in the same units: g_hz and kappa_hz are in Hz, and
+the radiative rate gamma_rad,C (1/s) enters as the linewidth
+gamma_rad,C / (2 pi) in Hz. `xi_pol_overlap`
 gives the polarisation overlap sin^2(theta) (1 + sin 2 psi)/2 of a
 <111> dipole with a linearly polarised cavity mode (2/3 at psi = 45 deg
 for <100>-oriented diamond).
@@ -129,11 +132,15 @@ class CavityInterface:
         self.eta_wg = float(eta_wg)
         self.eta = (self.beta * self.eta_wg * float(t_link)
                     * float(eta_chip) * float(eta_det))
-        # coupling rate defined so F_C = 4 g^2 / (kappa gamma_rad,C)
-        gamma_rad_c = budget.gamma0 * a                   # 1/s
-        self.g_hz = 0.5 * np.sqrt(self.f_c * self.kappa_hz * gamma_rad_c)
+        # coupling rate defined so F_C = 4 g^2 / (kappa gamma_rad,C),
+        # every rate in Hz: the decay rates (1/s) become linewidths
+        # gamma / (2 pi) in Hz, as in the bad-cavity check below
+        gamma_rad_c_hz = budget.gamma0 * a / (2.0 * np.pi)
+        self.g_hz = 0.5 * np.sqrt(self.f_c * self.kappa_hz
+                                  * gamma_rad_c_hz)
         self.cooperativity = (4.0 * self.g_hz ** 2
-                              / (self.kappa_hz * budget.gamma0))
+                              / (self.kappa_hz * budget.gamma0
+                                 / (2.0 * np.pi)))
         gamma_cav_hz = self.gamma_cav / (2.0 * np.pi)
         self.validity = dict(
             spin_selectivity=bool(gamma_cav_hz < omega_q_hz / 5.0),

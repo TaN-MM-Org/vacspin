@@ -31,7 +31,7 @@ from .lab import (SpinFit, design_fields, fit_spin_parameters,
                   load_observations_csv, parameter_information,
                   save_observations_csv)
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",

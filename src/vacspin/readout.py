@@ -27,7 +27,7 @@ require them to agree in their shared regimes:
 Exact limits asserted in the tests rather than stated: with no spin
 flips (Lambda -> inf) the bright count is exactly Poisson; deep in the
 flip-terminated regime (Gp tau >> 1) it is exactly geometric with mean
-eta Lambda; the general optimizer restricted to N_r = 1 reproduces the
+eta (Lambda + 1); the general optimizer restricted to N_r = 1 reproduces the
 closed form; fidelity is bounded by [1/2, 1] (at f0 = 1), increases
 with eta, and the shipped SnV- numbers reproduce the measured confocal
 operating point of arXiv:2403.13110 (n_b ~ 4 detected photons at
@@ -53,6 +53,8 @@ def _check_common(eta, lam, gamma, tau, s):
         raise ValueError("cyclicity Lambda must be finite and positive")
     if gamma <= 0 or tau <= 0 or s <= 0:
         raise ValueError("gamma, tau and s must be positive")
+    if not (np.isfinite(gamma) and np.isfinite(tau) and np.isfinite(s)):
+        raise ValueError("gamma, tau and s must be finite")
 
 
 def polarization_rate(gamma, lam, s=1.0, delta_over_gamma=0.0):
@@ -69,6 +71,8 @@ def readout_counts(eta, lam, gamma, tau, s=1.0, leak=0.0,
     n_b = n_d + eta (Lambda + 1)(1 - exp(-Gp tau)) (Eqs. A13-A15),
     n_d = (eta leak R + noise_rate) tau."""
     _check_common(eta, lam, gamma, tau, s)
+    if leak < 0 or noise_rate < 0:
+        raise ValueError("leak and noise_rate must be >= 0")
     r = 0.5 * gamma * s / (1.0 + s)
     gp = r / (1.0 + lam)
     n_d = (eta * leak * r + noise_rate) * tau
