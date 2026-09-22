@@ -4,6 +4,76 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## v0.3.1 - 2026-09-22
+
+A review release: three input and unit fixes, a wider CI, and a
+rewritten README.
+
+### Fixed
+
+- `CavityInterface.g_hz` multiplied the cavity linewidth `kappa_hz`
+  (Hz) by the radiative decay rate (1/s) without the factor 1/(2 pi),
+  so `g_hz` (and `g_mhz` in `summary()`) was too large by sqrt(2 pi),
+  about 2.5 times, and the `weak_coupling` check could refuse designs
+  that meet its stated condition g < kappa/10 (for example Q_L = 3000,
+  V = 0.68 with the SnV- budget, xi_pol = 2/3 and xi_pos = 0.5). The decay rate now enters as the
+  linewidth gamma/(2 pi) in Hz, as the bad-cavity check already did.
+  The Purcell factors, efficiencies, lifetime, cyclicity and
+  cooperativity are unchanged.
+- `readout_counts` accepted a negative `leak` or `noise_rate` and
+  returned a negative dark count; it now refuses them, as `fidelity`
+  already did.
+- The readout functions accepted non-finite `gamma`, `tau` or `s`:
+  `fidelity` returned NaN for `tau = inf` and failed with an unrelated
+  integer-conversion error for `gamma = NaN`. They now refuse
+  non-finite values with a clear message.
+
+### Tests
+
+- New: `test_coupling_rate_in_consistent_hz_units` (test_cavity.py),
+  `test_readout_counts_refuses_negative_background` and
+  `test_non_finite_rates_and_windows_refused` (test_readout.py). Each
+  fails on 0.3.0.
+- `test_purcell_formula_and_identity` now checks
+  F_C = 4 g^2 / (kappa gamma_rad) with every rate in Hz.
+- 62 tests (59 before).
+- CI now also runs Python 3.10 (the matrix skipped it), and a new
+  `oldest-dependencies` job runs the suite on Python 3.10 with
+  NumPy 1.22.0 and pytest 7.0.0, the lowest versions allowed.
+
+### Changed
+
+- README rewritten for readers outside the field: a guide to the
+  terms, units and conventions, six runnable examples with their exact
+  output, every public name, the refusals, and each test's real
+  tolerance.
+- Docstrings: `vacspin.params` said "Two sets ship" (three centres
+  ship); the `vacspin.readout` module docstring gave the geometric
+  limit's mean as eta Lambda, while the code and test use
+  eta (Lambda + 1).
+
+### Corrections to earlier notes
+
+- v0.2.0 said the greedy design "obeys the exact rank-one determinant
+  identity and its recomputed greedy rule". The identity is tested on
+  random matrices, not on `design_fields`, and no test recomputes the
+  greedy rule; the test checks that the chosen set is at least as
+  informative as 30 random subsets of the same size.
+- Several earlier notes and the old README called checks "exact" or
+  "machine precision" that the tests hold to a tolerance (for example
+  the Kramers degeneracy to 1e-9 GHz, the dipole sum rule to 1e-10,
+  the Poisson and geometric limits to 1e-10, the Purcell identity to
+  1 part in 10^9), and "400 seeded Monte Carlo experiments match the
+  reported error bars" means within 15 %. The measured SnV- values are
+  reproduced within 0.2 % (splitting), 2 % (qubit frequency) and 10 %
+  (cyclicity); the Rabi check is a 1-20 MHz window. The README now
+  gives each tolerance.
+- The old README said the readout statistics use "no numerical
+  quadrature". That holds for the bright-count distribution; the
+  dark-state switch-on channel is a numerical sum over 24 switch times.
+- The old README said CI runs Python 3.9-3.14; 3.10 was missing until
+  this release.
+
 ## v0.3.0 - 2026-09-18
 
 The third measured centre, and a future-proofing pass.
