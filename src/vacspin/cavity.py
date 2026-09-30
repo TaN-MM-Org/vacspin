@@ -43,8 +43,8 @@ __all__ = ["purcell_max", "lorentzian_suppression", "xi_pol_overlap",
 def purcell_max(q_loaded, v_rel):
     """Ideal Purcell factor F = (3/4 pi^2) Q/V, V in (lam/n)^3."""
     q, v = float(q_loaded), float(v_rel)
-    if q <= 0 or v <= 0:
-        raise ValueError("Q and V must be positive")
+    if not (q > 0 and v > 0 and np.isfinite(q) and np.isfinite(v)):
+        raise ValueError("Q and V must be positive and finite")
     return 3.0 / (4.0 * np.pi ** 2) * q / v
 
 
@@ -52,8 +52,11 @@ def lorentzian_suppression(delta_hz, f_cav_hz, q_loaded):
     """Purcell reduction of a transition detuned by delta from the
     cavity: L = 1 / (1 + (2 Q delta / f_cav)^2). Exactly 1 on
     resonance and exactly 1/2 at delta = f_cav / (2 Q) = kappa/2."""
-    if f_cav_hz <= 0 or q_loaded <= 0:
-        raise ValueError("f_cav_hz and Q must be positive")
+    if not (f_cav_hz > 0 and q_loaded > 0 and np.isfinite(f_cav_hz)
+            and np.isfinite(q_loaded)):
+        raise ValueError("f_cav_hz and Q must be positive and finite")
+    if not np.isfinite(delta_hz):
+        raise ValueError("delta_hz must be finite")
     x = 2.0 * float(q_loaded) * float(delta_hz) / float(f_cav_hz)
     return 1.0 / (1.0 + x * x)
 
@@ -109,8 +112,17 @@ class CavityInterface:
         if lambda0 <= 0 or not np.isfinite(lambda0):
             raise ValueError("lambda0 must be a finite positive "
                              "cyclicity (compute or measure it)")
-        if omega_q_hz <= 0:
-            raise ValueError("omega_q_hz must be positive")
+        if not (omega_q_hz > 0 and np.isfinite(omega_q_hz)):
+            raise ValueError("omega_q_hz must be positive and finite")
+        for name, v in (("q_loaded", q_loaded), ("v_rel", v_rel)):
+            if not (float(v) > 0 and np.isfinite(float(v))):
+                raise ValueError(f"{name} must be positive and finite")
+        if delta_partner_hz is not None and not (
+                float(delta_partner_hz) > 0
+                and np.isfinite(float(delta_partner_hz))):
+            raise ValueError("delta_partner_hz must be positive and "
+                             "finite (the partner line's detuning "
+                             "from the cavity, Hz)")
         self.q = float(q_loaded)
         self.v = float(v_rel)
         self.budget = budget

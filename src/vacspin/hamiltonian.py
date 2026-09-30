@@ -47,18 +47,29 @@ _I2 = np.eye(2)
 _SZ = np.array([[1.0, 0.0], [0.0, -1.0]])
 _ORB_Y = np.array([[0.0, 1j], [-1j, 0.0]])   # orbital angular momentum
 
+# The Kronecker products below are constants; building them once (rather
+# than on every call) makes `h_manifold` several times faster, which is
+# what the fits in `vacspin.lab` spend their time on. The matrix is the
+# same linear combination of the same products as before.
+_K_SO = np.kron(_ORB_Y, _SZ)
+_K_JT_X = np.kron(np.array([[1.0, 0.0], [0.0, -1.0]]), _I2)
+_K_JT_Y = np.kron(np.array([[0.0, 1.0], [1.0, 0.0]]), _I2)
+_K_SX = np.kron(_I2, np.array([[0.0, 1.0], [1.0, 0.0]]))
+_K_SY = np.kron(_I2, np.array([[0.0, -1j], [1j, 0.0]]))
+_K_SZ = np.kron(_I2, _SZ)
+_K_L = np.kron(_ORB_Y, _I2)
+
 
 def h_manifold(lam, ups_x, ups_y, f, delta, b_spin):
     """4x4 manifold Hamiltonian (GHz) for a field b_spin = (Bx, By, Bz)
     in tesla, given in the spin frame."""
     bx, by, bz = (float(b) for b in b_spin)
-    h_so = -0.5 * lam * np.kron(_ORB_Y, _SZ)
-    h_jt = np.kron(np.array([[ups_x, ups_y], [ups_y, -ups_x]]), _I2)
-    zee = np.array([[(1 + 2 * delta) * bz, bx - 1j * by],
-                    [bx + 1j * by, -(1 + 2 * delta) * bz]])
-    h_z = 0.5 * GAMMA_GHZ_PER_T * np.kron(_I2, zee)
-    h_l = 0.5 * GAMMA_GHZ_PER_T * f * bz * np.kron(_ORB_Y, _I2)
-    return h_so + h_jt + h_z + h_l
+    g2 = 0.5 * GAMMA_GHZ_PER_T
+    return (-0.5 * lam * _K_SO
+            + ups_x * _K_JT_X + ups_y * _K_JT_Y
+            + g2 * ((1 + 2 * delta) * bz * _K_SZ + bx * _K_SX
+                    + by * _K_SY)
+            + g2 * f * bz * _K_L)
 
 
 def lab_to_spin(v_lab, theta_rad, phi_rad):
@@ -120,8 +131,8 @@ def qubit_frequency_perpendicular(params: SpinParameters, b_perp_t,
     diagonalisation; use `qubit_frequency` for anything quantitative.
     """
     b = float(b_perp_t)
-    if b < 0:
-        raise ValueError("b_perp_t must be >= 0")
+    if not (np.isfinite(b) and b >= 0):
+        raise ValueError("b_perp_t must be finite and >= 0")
     if manifold == "ground":
         lam, ups = params.lam_g, params.ups_g
     elif manifold == "excited":

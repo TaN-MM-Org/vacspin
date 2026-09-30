@@ -12,8 +12,8 @@ what its source states:
   factors of G. Thiering and A. Gali, Phys. Rev. X 8, 021063 (2018),
   and the emission budget of Rosenthal et al., arXiv:2403.13110
   (lifetime, quantum efficiency) with the Debye-Waller factor of
-  Goerlitz et al. and the C/D branching ratio of Lee et al.,
-  arXiv:2511.05740. This set is validated against measured numbers in
+  Goerlitz et al., New J. Phys. 22, 013048 (2020) and the C/D
+  branching ratio of Lee et al., arXiv:2511.05740. This set is validated against measured numbers in
   the test suite (zero-field splittings, qubit frequency, cyclicity,
   Rabi rate) with no free parameters.
 * `siv_hepp2014`: the silicon-vacancy (SiV-) centre, unstrained
@@ -98,6 +98,17 @@ class SpinParameters:
 
     def __post_init__(self):
         _check_ref(self.reference)
+        for f in dataclasses.fields(self):
+            if f.name == "reference":
+                continue
+            v = getattr(self, f.name)
+            try:
+                ok = bool(np.isfinite(float(v)))
+            except (TypeError, ValueError):
+                ok = False
+            if not ok:
+                raise ValueError(f"{f.name} must be a finite number "
+                                 f"(got {v!r})")
         for name in ("lam_g", "lam_e"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive (GHz)")
@@ -172,16 +183,17 @@ def snv_rosenthal2023() -> SpinParameters:
 
 def snv_emission() -> EmissionBudget:
     """SnV- emission budget: lifetime 4.5 ns and quantum efficiency
-    0.8 from Rosenthal et al., arXiv:2403.13110 (Table II);
-    Debye-Waller factor 0.57 (Goerlitz et al. 2020, as used by Lee et
-    al.); C/D branching ratio 0.75 (Lee et al., arXiv:2511.05740);
-    zero-phonon line 619 nm."""
+    0.8 from Rosenthal et al., arXiv:2403.13110; Debye-Waller factor
+    0.57 (J. Goerlitz et al., New J. Phys. 22, 013048 (2020), as cited
+    and used by Lee et al.); C/D branching ratio 0.75 and zero-phonon
+    line 619 nm (Lee et al., arXiv:2511.05740)."""
     return EmissionBudget(
         tau0_s=4.5e-9, eta_q=0.80, eta_dw=0.57, eta_br=0.75,
         zpl_nm=619.0,
         reference="Rosenthal et al., arXiv:2403.13110 (tau, eta_q); "
-                  "Goerlitz et al. 2020 (eta_DW); Lee et al., "
-                  "arXiv:2511.05740 (eta_BR)")
+                  "Goerlitz et al., New J. Phys. 22, 013048 (2020) "
+                  "(eta_DW); Lee et al., arXiv:2511.05740 (eta_BR, "
+                  "ZPL)")
 
 
 def siv_hepp2014(theta_rad=None, phi_rad=None) -> SpinParameters:

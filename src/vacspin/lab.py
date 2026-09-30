@@ -48,10 +48,11 @@ import dataclasses
 
 import numpy as np
 
-from .hamiltonian import solve
+from .hamiltonian import h_manifold, lab_to_spin
 from .params import SpinParameters
 
 __all__ = ["SpinFit", "fit_spin_parameters", "parameter_information",
+           "propagate_uncertainty",
            "design_fields", "save_observations_csv",
            "load_observations_csv"]
 
@@ -90,15 +91,29 @@ def _invert_information(fisher, vary):
 
 
 def _observe(params, kind, b_lab, strain_scale):
-    eg, _, ee, _ = solve(params, b_lab, strain_scale)
-    if kind == "qubit":
-        return float(eg[1] - eg[0])
-    if kind == "orbital_g":
-        return float(eg[2] - eg[0])
+    """One observable (GHz). Only the manifold it needs is
+    diagonalised, and only for its eigenvalues (`eigvalsh`); the tests
+    check that this equals the full `solve` path."""
+    if kind not in _KINDS:
+        raise ValueError(f"unknown observable kind {kind!r}; "
+                         f"choose from {_KINDS}")
+    if not np.all(np.isfinite(b_lab)):
+        raise ValueError("magnetic field must be finite")
+    s = float(strain_scale)
+    if s < 0:
+        raise ValueError("strain_scale must be >= 0")
+    bs = lab_to_spin(b_lab, params.theta_rad, params.phi_rad)
     if kind == "orbital_e":
-        return float(ee[2] - ee[0])
-    raise ValueError(f"unknown observable kind {kind!r}; "
-                     f"choose from {_KINDS}")
+        e = np.linalg.eigvalsh(h_manifold(params.lam_e, s * params.ups_e,
+                                          0.0, params.f_e,
+                                          params.delta_e, bs))
+        return float(e[2] - e[0])
+    e = np.linalg.eigvalsh(h_manifold(params.lam_g, s * params.ups_g,
+                                      0.0, params.f_g, params.delta_g,
+                                      bs))
+    if kind == "qubit":
+        return float(e[1] - e[0])
+    return float(e[2] - e[0])
 
 
 def _check_inputs(kinds, b_fields_t, values_ghz, sigmas_ghz, vary):
@@ -304,6 +319,83 @@ def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
                    sigma={k: float(s) for k, s in zip(vary, err)},
                    cov=cov, chi2=chi2, chi2_dof=chi2_dof, n_points=n,
                    condition_number=cond, n_iter=it, converged=True)
+
+
+def propagate_uncertainty(fit, func, rel_step=1e-6):
+    """Carry a fit's error bars to any quantity computed from it.
+
+    fit : a `SpinFit` from `fit_spin_parameters`.
+    func : a function of a `SpinParameters` returning a number or an
+        array of numbers -- for example
+        ``lambda p: vacspin.qubit_frequency(p, b)`` for the qubit
+        frequency at a field you have not measured, or
+        ``lambda p: vacspin.cyclicity(p, b)``.
+    rel_step : step of the differences, relative to the parameter's
+        value (or to its error bar when that is larger).
+
+    Uses first-order ("delta method") propagation: with J the
+    derivatives of `func` with respect to the fitted parameters (by
+    central differences, one-sided at a parameter boundary such as
+    ups = 0), the covariance of the result is J cov J^T. This is exact
+    for a quantity that depends linearly on the fitted parameters and
+    a good approximation when the error bars are small compared with
+    the scale on which `func` curves; the tests compare it with direct
+    sampling of the fit's Gaussian uncertainty.
+
+    Returns dict(value, sigma, cov): `value` is func(fit.params)
+    (a float, or an array for array output), `sigma` its 1-sigma
+    uncertainty in the same shape, and `cov` the full covariance
+    matrix (1 x 1 for a scalar).
+    """
+    if not isinstance(fit, SpinFit):
+        raise TypeError("fit must be a SpinFit from fit_spin_parameters")
+    if not (np.isfinite(rel_step) and 0.0 < rel_step < 1e-2):
+        raise ValueError("rel_step must be in (0, 1e-2)")
+    vary = tuple(fit.values)
+    x = np.array([fit.values[k] for k in vary])
+    base = fit.params
+
+    def ev(xv):
+        return np.atleast_1d(np.asarray(
+            func(_replace(base, vary, xv)), dtype=float)).ravel()
+
+    value = np.asarray(func(base), dtype=float)
+    f0 = np.atleast_1d(value).ravel()
+    if not np.all(np.isfinite(f0)):
+        raise ValueError("func returned a non-finite value at the "
+                         "fitted parameters")
+    jac = np.empty((f0.size, x.size))
+    sig = np.sqrt(np.maximum(np.diag(np.asarray(fit.cov, dtype=float)),
+                             0.0))
+    for j in range(x.size):
+        # step relative to the value, or to the error bar when the
+        # value is near zero (e.g. a parameter at ups = 0)
+        h = rel_step * max(abs(x[j]), sig[j], 1e-3)
+        xp, xm = x.copy(), x.copy()
+        xp[j] += h
+        xm[j] -= h
+        # one-sided only when the lower point is not a valid parameter
+        # set (e.g. ups = 0 would step to negative strain); any error
+        # raised by `func` itself is passed on to the caller
+        try:
+            _replace(base, vary, xm)
+            lower_ok = True
+        except ValueError:
+            lower_ok = False
+        if lower_ok:
+            jac[:, j] = (ev(xp) - ev(xm)) / (2.0 * h)
+        else:
+            jac[:, j] = (ev(xp) - f0) / h
+    if not np.all(np.isfinite(jac)):
+        raise ValueError("func is not differentiable at the fitted "
+                         "parameters (non-finite derivative)")
+    cov = jac @ np.asarray(fit.cov) @ jac.T
+    sigma = np.sqrt(np.maximum(np.diag(cov), 0.0))
+    if value.ndim == 0:
+        return {"value": float(value), "sigma": float(sigma[0]),
+                "cov": cov}
+    return {"value": value, "sigma": sigma.reshape(value.shape),
+            "cov": cov}
 
 
 def parameter_information(kinds, b_fields_t, params,

@@ -19,6 +19,8 @@ input you own, not a number this package guesses.
 """
 from __future__ import annotations
 
+import math
+
 __all__ = ["barrett_kok_success", "entanglement_rate"]
 
 
@@ -38,6 +40,7 @@ def entanglement_rate(attempt_rate_hz, eta_a, eta_b=None):
     """Heralded entanglement rate: attempt_rate x (1/2) eta_A eta_B.
     The attempt rate is bounded by your reset and communication times;
     supply it, this package does not guess it."""
-    if attempt_rate_hz <= 0:
-        raise ValueError("attempt_rate_hz must be positive")
+    if not (float(attempt_rate_hz) > 0
+            and math.isfinite(float(attempt_rate_hz))):
+        raise ValueError("attempt_rate_hz must be positive and finite")
     return float(attempt_rate_hz) * barrett_kok_success(eta_a, eta_b)
