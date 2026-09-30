@@ -96,3 +96,34 @@ def test_qubit_frequency_zeeman_scale():
                                         (0.1, 0.0, 0.0)))
     # transverse splitting is second order: << the Zeeman scale
     assert (e_x[1] - e_x[0]) < 0.01 * GAMMA_GHZ_PER_T * 0.1
+
+
+def _h_reference(lam, ux, uy, f, delta, b):
+    """Rosenthal Eqs. B1-B5 written out term by term with np.kron, as
+    h_manifold computed them before 0.4.0 (the independent reference
+    for the precomputed-matrix form)."""
+    i2 = np.eye(2)
+    sz = np.array([[1.0, 0.0], [0.0, -1.0]])
+    ly = np.array([[0.0, 1j], [-1j, 0.0]])
+    bx, by, bz = b
+    h_so = -0.5 * lam * np.kron(ly, sz)
+    h_jt = np.kron(np.array([[ux, uy], [uy, -ux]]), i2)
+    zee = np.array([[(1 + 2 * delta) * bz, bx - 1j * by],
+                    [bx + 1j * by, -(1 + 2 * delta) * bz]])
+    h_z = 0.5 * 28.0 * np.kron(i2, zee)
+    h_l = 0.5 * 28.0 * f * bz * np.kron(ly, i2)
+    return h_so + h_jt + h_z + h_l
+
+
+def test_h_manifold_matches_term_by_term_construction():
+    """0.4.0 builds the Hamiltonian from precomputed Kronecker
+    products; it must equal the explicit term-by-term construction
+    for random inputs (to 1e-12 GHz)."""
+    rng = np.random.default_rng(12)
+    for _ in range(50):
+        lam, ux, uy = rng.uniform(0, 3000, 3)
+        f, d = rng.uniform(-0.5, 0.5, 2)
+        b = rng.normal(0, 0.5, 3)
+        h = h_manifold(lam, ux, uy, f, d, b)
+        assert np.max(np.abs(h - _h_reference(lam, ux, uy, f, d, b))) \
+            < 1e-12

@@ -68,3 +68,52 @@ def test_barrett_kok_exact_form():
         barrett_kok_success(1.2)
     with pytest.raises(ValueError):
         entanglement_rate(0.0, 0.5)
+
+
+def test_non_finite_inputs_refused():
+    """NaN and infinity are refused with a message instead of flowing
+    into NaN results (before 0.4.0: a NaN spin-orbit constant was
+    accepted, purcell_max(nan, 1) returned nan, CavityInterface with
+    Q = 0 raised ZeroDivisionError and with omega_q = nan returned a
+    validity verdict, entanglement_rate(inf, 0.5) returned inf)."""
+    import dataclasses
+    from vacspin import (CavityInterface, fidelity_threshold1,
+                         lorentzian_suppression, polarization_rate,
+                         purcell_max, qubit_frequency_perpendicular,
+                         xi_pol_overlap)
+    p = snv_rosenthal2023()
+    for name in ("lam_g", "ups_e", "f_g", "delta_e", "theta_rad"):
+        for bad in (np.nan, np.inf):
+            with pytest.raises(ValueError, match="finite"):
+                dataclasses.replace(p, **{name: bad})
+    with pytest.raises(ValueError, match="finite"):
+        qubit_frequency_perpendicular(p, np.nan)
+    with pytest.raises(ValueError):
+        purcell_max(np.nan, 1.0)
+    with pytest.raises(ValueError):
+        purcell_max(np.inf, 1.0)
+    with pytest.raises(ValueError):
+        lorentzian_suppression(np.nan, 4.8e14, 500.0)
+    base = dict(q_loaded=500.0, v_rel=0.68, eta_wg=0.99,
+                budget=snv_emission(), lambda0=2244.0, omega_q_hz=3.7e9,
+                xi_pol=xi_pol_overlap(), xi_pos=0.5)
+    for key, bad in (("q_loaded", 0.0), ("q_loaded", np.inf),
+                     ("v_rel", np.nan), ("omega_q_hz", np.nan),
+                     ("delta_partner_hz", np.nan),
+                     ("delta_partner_hz", -1e12)):
+        args = dict(base)
+        args[key] = bad
+        with pytest.raises(ValueError):
+            CavityInterface(**args)
+    CavityInterface(**base)                       # the valid case builds
+    with pytest.raises(ValueError, match="finite"):
+        entanglement_rate(np.inf, 0.5)
+    with pytest.raises(ValueError, match="finite"):
+        entanglement_rate(np.nan, 0.5)
+    with pytest.raises(ValueError, match="finite"):
+        fidelity_threshold1(np.nan, 0.0)
+    with pytest.raises(ValueError, match="finite"):
+        polarization_rate(np.nan, 10.0)
+    # array inputs keep working
+    rates = polarization_rate(1e8, np.array([0.0, 9.0]))
+    assert abs(rates[1] - rates[0] / 10.0) < 1e-6

@@ -82,10 +82,11 @@ def test_fidelity_bounds_and_monotonicity_in_eta():
 
 
 def test_confocal_operating_point_reproduced():
-    """arXiv:2403.13110 confocal readout: eta ~ 0.2%, Lambda = 2244,
-    tau = 50 us gives n_b ~ 4 detected photons (measured), n_d <= 0.2
-    with the reported background. The mean-count model must land on
-    the measured photon number."""
+    """arXiv:2403.13110 confocal readout: Lambda = 2244, tau = 50 us,
+    n_b ~ 4 detected photons and n_d <= 0.2 (measured). With
+    eta = 0.2 % the mean-count model lands on the measured photon
+    number. Note: the paper's own fitted efficiency is about 0.1 %;
+    eta = 0.2 % is chosen here to match the reported counts."""
     nb, nd = readout_counts(0.002, 2244.0, GAMMA0, 50e-6, s=10.0,
                             noise_rate=0.2 / 50e-6)
     assert 3.0 < nb - nd < 5.0                   # measured ~ 4

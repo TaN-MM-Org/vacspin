@@ -48,10 +48,11 @@ def test_fast_readout_fidelity():
     """The paper's headline regime: single-shot fidelity above 98%
     within a sub-100-ns window, with the dark leak computed from the
     cavity linewidth and qubit frequency (power broadening at s = 2).
-    This package's switch-on treatment integrates the exact bright
-    distribution (the source pipeline used a 9-point quadrature), so
-    its numbers are the conservative side of the paper's 98.5%: above
-    98% at the optimal window, above 95% at a full 100 ns."""
+    Since 0.4.0 the dark switch-on channel is evaluated exactly (the
+    source pipeline used a 9-point quadrature, vacspin 0.3 a 24-point
+    sum); the numbers sit on the conservative side of the paper's
+    98.5%: 0.9813 at the best of the four windows (0.9818 in 0.3.1),
+    0.9488 at a full 100 ns with f0 = 0.99 (0.9512 in 0.3.1)."""
     ci, omega_q = _paper_interface()
     s = 2.0
     gamma_cav_hz = ci.gamma_cav / (2.0 * np.pi)

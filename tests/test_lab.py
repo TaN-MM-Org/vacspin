@@ -33,11 +33,35 @@ def test_observables_match_solver_paths():
     "qubit" is qubit_frequency, and "orbital_g" at zero field is the
     closed-form splitting sqrt(lam^2 + 4 ups^2)."""
     b = field_on_circle(147.0, 0.125)
-    assert _observe(P, "qubit", b, 1.0) == qubit_frequency(P, b)
+    # since 0.4.0 the lab path uses eigvalsh on one manifold; it agrees
+    # with the eigh path of qubit_frequency to round-off (~1e-13 GHz)
+    assert abs(_observe(P, "qubit", b, 1.0) - qubit_frequency(P, b)) \
+        < 1e-9
     d = _observe(P, "orbital_g", [0.0, 0.0, 0.0], 1.0)
     assert abs(d - zero_field_splitting(P.lam_g, P.ups_g)) < 1e-9
     d_e = _observe(P, "orbital_e", [0.0, 0.0, 0.0], 1.0)
     assert abs(d_e - zero_field_splitting(P.lam_e, P.ups_e)) < 1e-9
+
+
+def test_lab_observables_equal_full_solver_for_random_fields():
+    """The eigenvalue-only, single-manifold path used by the fits (since
+    0.4.0) equals the full `solve` path for every kind, random fields
+    and strain scales (to 1e-9 GHz), and refuses what `solve` refuses."""
+    from vacspin import solve
+    rng = np.random.default_rng(5)
+    for _ in range(20):
+        b = rng.normal(0.0, 0.3, 3)
+        s = rng.uniform(0.0, 2.0)
+        eg, _, ee, _ = solve(P, b, strain_scale=s)
+        assert abs(_observe(P, "qubit", b, s) - (eg[1] - eg[0])) < 1e-9
+        assert abs(_observe(P, "orbital_g", b, s) - (eg[2] - eg[0])) \
+            < 1e-9
+        assert abs(_observe(P, "orbital_e", b, s) - (ee[2] - ee[0])) \
+            < 1e-9
+    with pytest.raises(ValueError, match="finite"):
+        _observe(P, "qubit", [np.nan, 0.0, 0.0], 1.0)
+    with pytest.raises(ValueError, match="strain_scale"):
+        _observe(P, "qubit", [0.0, 0.0, 0.1], -1.0)
 
 
 def test_noiseless_fit_recovers_truth():
@@ -214,3 +238,110 @@ def test_input_refusals():
                             vary=("lam_g", "ups_g"))
     with pytest.raises(ValueError, match="n_pick"):
         design_fields(kinds, fields, 1, P, vary=("lam_g", "ups_g"))
+
+
+def test_propagation_exact_for_linear_quantities():
+    """For quantities linear in the fitted parameters first-order
+    propagation is exact: the parameter itself returns its own error
+    bar (to 1e-9 relative), the zero-field splitting at ups_g = 0
+    (which IS lam_g) returns sigma / sqrt(n), and a fixed linear
+    combination A x returns the covariance A C A^T (to 1e-8 relative)."""
+    from vacspin import propagate_uncertainty
+    p0 = dataclasses.replace(P, ups_g=0.0)
+    n, sigma = 6, 0.3
+    fit = fit_spin_parameters(["orbital_g"] * n, np.zeros((n, 3)),
+                              np.full(n, p0.lam_g), p0, vary=("lam_g",),
+                              sigmas_ghz=sigma)
+    out = propagate_uncertainty(fit, lambda p: p.lam_g)
+    assert abs(out["sigma"] - fit.sigma["lam_g"]) < 1e-9 * out["sigma"]
+    out = propagate_uncertainty(
+        fit, lambda p: zero_field_splitting(p.lam_g, p.ups_g))
+    assert abs(out["sigma"] - sigma / np.sqrt(n)) < 1e-9
+    # two parameters, vector output
+    kinds, fields = _design()
+    values = np.array([_observe(P, k, b, 1.0)
+                       for k, b in zip(kinds, fields)])
+    fit2 = fit_spin_parameters(kinds, fields, values, P,
+                               vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+    a = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 2.0]])
+    out = propagate_uncertainty(
+        fit2, lambda p: [p.lam_g, p.ups_g, p.lam_g + 2.0 * p.ups_g])
+    want = a @ fit2.cov @ a.T
+    assert out["value"].shape == (3,) and out["sigma"].shape == (3,)
+    assert np.allclose(out["cov"], want, rtol=1e-8, atol=0.0)
+    assert np.allclose(out["sigma"], np.sqrt(np.diag(want)), rtol=1e-8)
+
+
+def test_propagation_matches_sampling_for_a_prediction():
+    """The qubit frequency at a field that was not measured is a
+    nonlinear function of (lam_g, ups_g). Its propagated error bar
+    agrees within 5 % with the spread obtained by sampling 4000
+    parameter sets from the fit's Gaussian uncertainty and evaluating
+    qubit_frequency on each (a second, independent method)."""
+    from vacspin import propagate_uncertainty
+    kinds, fields = _design()
+    values = np.array([_observe(P, k, b, 1.0)
+                       for k, b in zip(kinds, fields)])
+    fit = fit_spin_parameters(kinds, fields, values, P,
+                              vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+    b_new = field_on_circle(35.0, 0.3)
+    out = propagate_uncertainty(fit, lambda p: qubit_frequency(p, b_new))
+    assert out["value"] == qubit_frequency(fit.params, b_new)
+    rng = np.random.default_rng(21)
+    draws = rng.multivariate_normal(
+        [fit.values["lam_g"], fit.values["ups_g"]], fit.cov, size=4000)
+    samples = [qubit_frequency(dataclasses.replace(
+        fit.params, lam_g=lg, ups_g=ug), b_new) for lg, ug in draws]
+    spread = float(np.std(samples, ddof=1))
+    assert out["sigma"] > 0.0
+    assert abs(out["sigma"] - spread) < 0.05 * spread
+
+
+def test_propagation_refusals():
+    from vacspin import propagate_uncertainty
+    kinds, fields = _design()
+    values = np.array([_observe(P, k, b, 1.0)
+                       for k, b in zip(kinds, fields)])
+    fit = fit_spin_parameters(kinds, fields, values, P,
+                              vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+    with pytest.raises(TypeError):
+        propagate_uncertainty({"not": "a fit"}, lambda p: p.lam_g)
+    with pytest.raises(ValueError, match="rel_step"):
+        propagate_uncertainty(fit, lambda p: p.lam_g, rel_step=0.5)
+    with pytest.raises(ValueError, match="non-finite"):
+        propagate_uncertainty(fit, lambda p: np.nan)
+
+
+def test_propagation_boundary_and_error_handling():
+    """At a parameter boundary (ups_g = 0: a downward step would give
+    negative strain) the slope is taken one-sided, which is exact for
+    a linear function: sigma(lam_g + 2 ups_g) = 2 sigma(ups_g) when
+    only ups_g is varied (to 1e-6 relative: the step is 1e-6 of the
+    error bar, so round-off on the ~830 GHz value limits the slope to
+    about 1e-7). An error raised by the
+    user's function itself at a valid parameter set is NOT swallowed
+    into a one-sided difference; it reaches the caller."""
+    from vacspin import SpinFit, propagate_uncertainty
+    s_ups = 0.7
+    base = dataclasses.replace(P, ups_g=0.0)
+    fit = SpinFit(params=base, values={"ups_g": 0.0},
+                  sigma={"ups_g": s_ups}, cov=np.array([[s_ups ** 2]]),
+                  chi2=None, chi2_dof=None, n_points=3,
+                  condition_number=1.0, n_iter=1, converged=True)
+    out = propagate_uncertainty(fit, lambda p: p.lam_g + 2.0 * p.ups_g)
+    assert abs(out["sigma"] - 2.0 * s_ups) < 1e-6 * 2.0 * s_ups
+
+    kinds, fields = _design()
+    values = np.array([_observe(P, k, b, 1.0)
+                       for k, b in zip(kinds, fields)])
+    fit2 = fit_spin_parameters(kinds, fields, values, P,
+                               vary=("lam_g", "ups_g"), sigmas_ghz=0.05)
+    lam_fit = fit2.values["lam_g"]
+
+    def picky(p):
+        if p.lam_g < lam_fit:
+            raise ValueError("picky function refuses")
+        return p.lam_g
+
+    with pytest.raises(ValueError, match="picky"):
+        propagate_uncertainty(fit2, picky)
