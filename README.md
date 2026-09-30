@@ -25,6 +25,8 @@ optics around it, the package answers questions such as:
 - From your own measured frequencies, what are the parameters of *your*
   centre, with error bars -- and will a planned set of measurements be
   able to determine them at all?
+- With those error bars, how uncertain is any number predicted from
+  the fitted centre (a qubit frequency at a new field, a cyclicity)?
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -106,9 +108,10 @@ number that looks fine but is not.
   time **window** `tau`; the spin is called "bright" if the count
   reaches a **threshold**. 0.5 is a coin toss, 1 is perfect.
 - **Dark counts / leak / switch-on** -- ways the dark spin state can
-  still produce clicks: detector background (`noise_rate`), weak
-  off-resonant scattering (`leak`), and an off-resonant excitation
-  that flips the dark spin into the bright state during the window.
+  still produce clicks: detector background (`noise_rate`, which adds
+  clicks to both spin states), weak off-resonant scattering (`leak`),
+  and an off-resonant excitation that flips the dark spin into the
+  bright state during the window (switch-on).
 - **Heralded entanglement** (Barrett-Kok scheme) -- two nodes each
   send a photon; a joint detection announces that the two spins are
   now entangled.
@@ -147,7 +150,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.3.1. The cavity, detector, attempt-rate and
+printed with vacspin 0.4.0. The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -306,26 +309,44 @@ try:
     vs.required_efficiency(0.999, lam=3.0, gamma=gamma, tau=1e-6)
 except ValueError as err:
     print("refused:", err)
+
+# The same readout, but the dark spin also scatters light off-resonantly
+# (leak = 1 % of the resonant rate), which also switches it on.
+out = vs.fidelity(0.002, 2244.0, gamma, 50e-6, s=10.0, leak=0.01,
+                  noise_rate=0.2 / 50e-6)
+print(f"with leak: fidelity {out['fidelity']:.3f}, mean counts "
+      f"bright {out['n_bright_total']:.2f}, dark {out['n_dark_total']:.2f}")
 ```
 
 ```
 mean counts: bright 4.22, dark 0.20
 threshold-1 fidelity: 0.9020
-window for 85 %: 9.4 us
+window for 85 %: 8.8 us
 efficiency for 99 % in 10 us: 0.0218
 refused: target fidelity 0.999 is unreachable at this operating point: even eta = 1 gives 0.9000. Increase the cyclicity, the window, or reduce the dark counts.
+with leak: fidelity 0.500, mean counts bright 4.22, dark 4.30
 ```
 
 These inputs are the confocal case the test suite uses for the
-measured readout of Rosenthal et al., arXiv:2403.13110 (about 4
-detected photons at eta = 0.2 %); the test asserts a bright-minus-dark
-mean between 3 and 5. `s` is the **saturation parameter** of the optical drive (how
-hard it is driven); `fidelity_threshold1` is the closed form for a
-threshold of one photon. `required_window` and `required_efficiency`
+measured readout of Rosenthal et al., arXiv:2403.13110, which reports
+about 4 bright counts and at most 0.2 dark counts in a 50 us window at
+cyclicity 2244; the test asserts a bright-minus-dark mean between 3
+and 5. The efficiency 0.2 % is chosen so that this package's
+mean-count formula gives those 4 counts; the paper's own fitted
+efficiency is about 0.1 %, so treat 0.2 % as a matched input, not a
+quoted one. `s` is the **saturation parameter** of the optical drive
+(how hard it is driven); `fidelity_threshold1` is the closed form for
+a threshold of one photon. `required_window` and `required_efficiency`
 search the full model (`fidelity`) and refuse when no value reaches the
 target. Compared with example 2, the cavity turns a window of
 microseconds into one of tens of nanoseconds; the test suite checks
 that the required window shrinks by more than 100 times.
+
+In the last case the leak switches the dark spin on within about a
+microsecond, so for most of the window both spin states look bright
+and one measurement cannot tell them apart (fidelity 0.5). `fidelity`
+evaluates this switch-on channel exactly (since 0.4.0; 0.3.1 gave 0.72
+here, see [Corrections](#corrections-in-earlier-versions)).
 
 ### 4. Remote entanglement
 
@@ -429,6 +450,44 @@ heuristic, not a proof of the best possible subset. Observation
 records can be saved and reloaded with `save_observations_csv` and
 `load_observations_csv`; the round trip returns identical values.
 
+### 6. Error bars on anything you predict from the fit
+
+Continuing example 5 (run it first; `fit` and `truth` come from
+there):
+
+```python
+# The qubit frequency at a field you did not measure, with its error bar
+b_new = vs.field_on_circle(35.0, 0.30)
+q = vs.propagate_uncertainty(fit, lambda p: vs.qubit_frequency(p, b_new))
+print(f"qubit frequency at 300 mT, 35 deg: {q['value']:.3f} +/- {q['sigma']:.3f} GHz"
+      f" (true {vs.qubit_frequency(truth, b_new):.3f})")
+
+# Any function of the parameters works, including several outputs at once
+z = vs.propagate_uncertainty(
+    fit, lambda p: [vs.zero_field_splitting(p.lam_g, p.ups_g),
+                    vs.cyclicity(p, b_new)])
+print("ground splitting: {:.2f} +/- {:.2f} GHz".format(z["value"][0], z["sigma"][0]))
+print("cyclicity:        {:.1f} +/- {:.1f}".format(z["value"][1], z["sigma"][1]))
+```
+
+```
+qubit frequency at 300 mT, 35 deg: 4.126 +/- 0.141 GHz (true 4.032)
+ground splitting: 917.57 +/- 0.03 GHz
+cyclicity:        5.8 +/- 0.4
+```
+
+`propagate_uncertainty` takes the slopes of your function with
+respect to the fitted parameters and combines them with the fit's
+covariance matrix (first-order error propagation). It is exact for a
+quantity that depends linearly on the fitted parameters, and a good
+approximation when the error bars are small compared with how quickly
+the quantity curves; the tests compare it with the spread obtained by
+drawing many parameter sets from the fit's uncertainty (within 5 %).
+The ground splitting is known far better than `lam_g` and `ups_g`
+separately, because the fit pins down the combination
+`sqrt(lam^2 + 4 ups^2)` directly; `cov` in the result carries such
+correlations.
+
 ## Cited parameter sets
 
 No physical number is made up, and none is accepted without a source:
@@ -440,9 +499,9 @@ too-short one.
   Rosenthal et al., PRX 13, 031022 (2023) (Table I) with the
   Thiering-Gali quenching factors (Thiering & Gali, PRX 8, 021063
   (2018)), and the emission budget of arXiv:2403.13110 (lifetime
-  4.5 ns, quantum efficiency 0.8) / Goerlitz et al. 2020 (Debye-Waller
-  factor 0.57) / Lee et al., arXiv:2511.05740 (branching ratio 0.75),
-  zero-phonon line 619 nm. Checked against measurement in the tests
+  4.5 ns, quantum efficiency 0.8) / Goerlitz et al., New J. Phys. 22,
+  013048 (2020) (Debye-Waller factor 0.57) / Lee et al.,
+  arXiv:2511.05740 (branching ratio 0.75, zero-phonon line 619 nm). Checked against measurement in the tests
   with no fitted numbers: the 902.98 GHz splitting, the 3.677 GHz qubit
   frequency, the cyclicity landscape (8.6 at 53 degrees, 2244 near
   alignment), and a Rabi rate on the MHz scale (tolerances in
@@ -546,8 +605,14 @@ Appendix A)
 - `fidelity_threshold1` -- the closed-form fidelity at a threshold of
   one photon (Eq. A20).
 - `fidelity` -- the fidelity at the best whole-number threshold, from
-  the full bright-count distribution and the dark-state model
-  (background, `leak`, switch-on).
+  the full count distributions of both spin states: the bright one
+  (spin flips end its record) plus background, and the dark one
+  (background, `leak`, and the switch-on channel, evaluated exactly).
+  Besides `fidelity` and `threshold` it returns `n_bright` (mean signal
+  count), `n_dark` (mean background plus leak count),
+  `n_bright_total` and `n_dark_total` (the means of the two full
+  distributions) and `truncation_bound` (a guaranteed bound, at most
+  1e-9, on the error from tracking a finite number of counts).
 - `required_efficiency`, `required_window` -- the smallest efficiency
   or shortest window that reaches a target fidelity.
 - `poisson_pmf`, `geometric_pmf` -- the two limiting count
@@ -569,6 +634,9 @@ Appendix A)
   measured frequencies; returns a `SpinFit` with `params` (a ready
   `SpinParameters` whose `reference` records the fit and the base set),
   `values`, `sigma`, `cov`, `chi2`, `chi2_dof` and more.
+- `propagate_uncertainty` -- after fitting: the value and error bar
+  (and covariance) of any quantity computed from the fitted
+  parameters, by first-order error propagation.
 - `save_observations_csv`, `load_observations_csv` -- a plain CSV
   format for observation records (columns `kind, bx_t, by_t, bz_t,
   value_ghz` and optionally `sigma_ghz`).
@@ -580,42 +648,47 @@ Appendix A)
 `vacspin` raises an error instead of guessing when:
 
 - a parameter set has no real `reference` (fewer than 8 characters), a
-  spin-orbit constant that is not positive, a negative strain, a
-  lifetime or wavelength that is not positive and finite, or an
-  efficiency outside (0, 1];
+  number that is not finite (NaN or infinity), a spin-orbit constant
+  that is not positive, a negative strain, a lifetime or wavelength
+  that is not positive and finite, or an efficiency outside (0, 1];
 - the magnetic field is not finite, `strain_scale` is negative, or the
-  sideways field given to `qubit_frequency_perpendicular` is negative;
+  sideways field given to `qubit_frequency_perpendicular` is negative
+  or not finite;
 - a manifold or field-plane name is unknown;
-- a cavity's `Q` is negative or `V` is not positive (in
-  `CavityInterface`, `Q = 0` currently stops with a
-  `ZeroDivisionError`), an efficiency or overlap is
-  outside [0, 1], the bare cyclicity is not finite and positive, or the
-  qubit frequency is not positive;
+- a cavity's `Q` or `V` is not positive and finite, an efficiency or
+  overlap is outside [0, 1], the bare cyclicity is not finite and
+  positive, or the qubit frequency or `delta_partner_hz` is not
+  positive and finite;
 - `require_valid()` finds the interface outside the bad-cavity,
   weak-coupling or spin-selective regime (and, when
   `delta_partner_hz` is given, the partner-selectivity condition); it
   names every failed condition;
 - a readout input is out of range: `eta` outside [0, 1], a cyclicity
   that is not finite and positive, a decay rate, window or saturation
-  parameter that is not positive and finite, a negative `leak` or
-  `noise_rate`, `f0` outside (0, 1], or negative mean counts;
+  parameter that is not positive and finite, a `leak` or `noise_rate`
+  that is negative or not finite, `f0` outside (0, 1], or mean counts
+  that are negative or not finite;
+- `fidelity` would need count distributions wider than 2^18 = 262144
+  counts to stay within its 1e-9 accuracy bound (a very long window
+  with a very high background);
 - a target fidelity is outside (0.5, 1), or cannot be reached (by any
-  efficiency up to 1, or any window up to `tau_max`); the message gives
-  the best value found;
+  efficiency up to 1, or any window up to `tau_max`, which must be
+  finite and longer than 1 ns); the message gives the best value found;
 - a detection efficiency is outside [0, 1] or the attempt rate is not
-  positive (remote entanglement);
+  positive and finite (remote entanglement);
 - in `vacspin.lab`: an unknown observable kind or parameter name, a
   repeated or empty `vary`, fields of the wrong shape or not finite,
   measurement errors that are not positive, too few observations for
   the parameters (and, without `sigmas_ghz`, for an error scale), a
   design that cannot tell the parameters apart, an `n_pick` outside
-  its range, a fit that does not converge (`RuntimeError`), or a CSV
+  its range, a fit that does not converge (`RuntimeError`), a CSV
   file with a wrong header, a short row, a non-numeric value or no
-  data.
+  data, or (in `propagate_uncertainty`) a function that returns a
+  non-finite value or slope.
 
 ## How the results are checked
 
-62 automated tests run on every push and pull request, on Python 3.9,
+84 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -648,6 +721,9 @@ checks, with the tolerances the tests actually use:
 - The Rabi rate is zero without a drive, exactly doubles when the
   drive doubles (to 1 part in 10^12), and lies between 1 and 20 MHz for
   a 0.6 mT drive (measured: about 6.25 MHz).
+- The Hamiltonian built from precomputed matrices (since 0.4.0, for
+  speed) equals the term-by-term construction for 50 random inputs
+  (to 1e-12 GHz).
 
 **Against published measurements (SnV-, no fitted numbers)**
 
@@ -703,7 +779,32 @@ checks, with the tolerances the tests actually use:
   scales as `1/(1 + Lambda)` (to `1e-12 gamma`).
 - `required_efficiency` returns an efficiency that reaches the target
   (and half of it does not); `required_window` returns a window that
-  reaches it; both refuse unreachable targets.
+  reaches it while a window 0.1 % shorter does not; both refuse
+  unreachable targets.
+- `required_window` below its 1 ns search grid: for an emitter without
+  spin flips or background the shortest window has the closed form
+  `ln(1 / (2 (1 - F))) / (eta R)`; the result agrees to 1 part in 10^5.
+- Background in the bright state: without spin flips and leak both
+  states are Poisson, and `fidelity` (value and threshold) equals the
+  best-threshold Poisson closed form (to 1e-9), in two cases including
+  150 signal counts on 200 background counts.
+- The mean bright count for very rare spin flips (cyclicity 10^9 to
+  10^15) matches its series limit `eta R tau (1 - Gp tau / 2)` (to 1
+  part in 10^12).
+- The dark switch-on distribution matches a direct double numerical
+  integration over the switch and flip times (to 1e-6 per value, two
+  cases covering both evaluation branches), sums to 1 (to 1e-12), and
+  its mean equals the numerically integrated survival function times
+  the count rate (to 1 part in 10^9), in four cases.
+- Monte Carlo: 400 000 simulated shots per spin state of the counting
+  process; the fidelity at the returned threshold and the mean bright
+  and dark counts agree with `fidelity` within 5 standard errors, in
+  three cases
+  (slow switch-on, switch-on within the first microsecond, and the
+  cavity design point).
+- `readout_counts` and `fidelity` differ, as documented, only by the
+  leak counts `eta leak R tau` in the bright mean (to 1e-12 relative;
+  zero without leak).
 
 **The source study's design point** (Q = 500 cavity, from the study's
 stated inputs, with the qubit frequency computed by the package)
@@ -737,8 +838,59 @@ stated inputs, with the qubit frequency computed by the package)
   of 30 random subsets of the same size. (The rank-one determinant
   identity behind the greedy rule is checked on random matrices.)
 - A CSV round trip returns identical values.
+- The faster eigenvalue-only path used by the fits equals the full
+  solver for all three observables, 20 random fields and strain
+  scales (to 1e-9 GHz).
+- `propagate_uncertainty` is exact where it should be: a fitted
+  parameter returns its own error bar (to 1e-9 relative), the
+  zero-field splitting at zero strain returns `sigma / sqrt(n)` (to
+  1e-9 GHz), and a fixed linear combination `A x` returns
+  `A C A^T` (to 1e-8 relative). For a nonlinear prediction (the qubit
+  frequency at a new field) it agrees within 5 % with the spread of
+  4000 parameter sets drawn from the fit's uncertainty. At a
+  parameter boundary (zero strain) the slope is taken one-sided and
+  is still right for a linear quantity (to 1e-6 relative), and an
+  error raised by your own function reaches you instead of being
+  hidden.
+
+**Inputs**
+
+- NaN and infinite values are refused across the parameter classes,
+  the cavity, readout and remote-entanglement functions (with array
+  input to `polarization_rate` still accepted).
 
 ## Corrections in earlier versions
+
+**0.4.0 fixed four problems in the readout model and the inputs.**
+
+- `fidelity` left the detector background (`noise_rate`) out of the
+  bright spin's counts, although detector dark counts and stray light
+  do not depend on the spin, and this package's own `readout_counts`
+  includes them in the bright mean.
+  Background counts can only help the bright state pass the
+  threshold, so the old fidelity was too low, sometimes badly: with
+  150 signal counts on 200 background counts it returned 0.500
+  instead of 0.999998.
+- The dark switch-on channel was a 24-point sum over switch times and
+  was added to the background error and capped at 1. When the switch
+  happens early in the window the sum missed most of it: for the
+  confocal readout with `leak = 0.01` (example 3) 0.3.1 gave 0.718,
+  while the model's exact value and a Monte Carlo simulation give
+  0.500. It is now evaluated exactly and combined with the background
+  exactly.
+- The mean bright count `eta (Lambda + 1)(1 - exp(-Gp tau))` lost
+  digits for very large cyclicity (relative error 6e-5 at 10^15); it
+  now uses `expm1`.
+- NaN or infinite inputs could pass silently and give NaN or infinite
+  results (for example a NaN spin-orbit constant, `purcell_max(nan,
+  1)`, `entanglement_rate(inf, 0.5)`), and `CavityInterface` with
+  `Q = 0` stopped with a `ZeroDivisionError`. These are now refused
+  with a clear message. `required_window` returned 1 ns whenever the
+  target was already reached at 1 ns; it now finds the shorter window.
+
+What changed in numbers: see the "Behaviour changes" note in
+[CHANGELOG.md](CHANGELOG.md). With no background and no leak every
+result is unchanged.
 
 **0.3.1 fixed three problems found in a review of 0.3.0.**
 
@@ -774,11 +926,21 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   thresholds are fixed factors: decay linewidth below a tenth of the
   cavity linewidth, `g` below a tenth of the cavity linewidth, and
   decay linewidth below a fifth of the qubit frequency.
-- **Dark-state switch-on is approximate.** The bright-count
-  distribution is evaluated in closed form, but the switch-on channel
-  is averaged over 24 switch times (a numerical sum, `nt_switch`), and
-  its error probability is added to the background error and capped
-  at 1 rather than combined exactly.
+- **The readout model is a two-state counting model.** Both count
+  distributions are evaluated exactly within it, but it leaves out
+  some second-order effects: once a bright spin has flipped to dark
+  it produces no leak counts and cannot switch back on, and a dark
+  spin's leak counts are counted for the whole window even after it
+  has switched on (the leak is small whenever the readout is good).
+  The `nt_switch` argument of `fidelity` is ignored since 0.4.0.
+- **Leak counts belong to the dark spin only.** In `fidelity` the
+  bright spin gets the background (`noise_rate`) but no `leak`
+  counts, because the leak is off-resonant scattering of the dark
+  spin. `readout_counts` keeps the simpler bookkeeping of its source
+  and adds the whole dark mean, leak included, to the bright mean, so
+  with `leak > 0` its bright mean exceeds `fidelity`'s
+  `n_bright_total` by exactly `eta leak R tau` (example 3 with
+  `leak = 0.01`: 4.3176 against 4.2166). With `leak = 0` they agree.
 - **The measured cyclicity near alignment depends on alignment.** At
   the nominal angles the model gives a much lower cyclicity than the
   measured 2244; see example 1.
@@ -788,7 +950,11 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   supply or fit your own.
 - **The `lab` fits** use a local Levenberg-Marquardt search (a standard
   step-by-step least-squares method) from your starting set; the error
-  bars assume independent Gaussian measurement errors, and the greedy design is a heuristic.
+  bars assume independent Gaussian measurement errors, and the greedy
+  design is a heuristic. `propagate_uncertainty` is first-order: when
+  an error bar is large compared with the scale on which the predicted
+  quantity curves (or reaches a boundary such as zero strain), sample
+  the fit's uncertainty instead.
 
 ## Where it comes from
 
