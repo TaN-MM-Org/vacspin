@@ -61,13 +61,20 @@ def lorentzian_suppression(delta_hz, f_cav_hz, q_loaded):
     return 1.0 / (1.0 + x * x)
 
 
-def xi_pol_overlap(theta_deg=54.7356, psi_deg=45.0):
-    """Polarisation overlap |mu_hat . e_cav|^2 of a <111> dipole with a
-    linearly polarised in-plane cavity mode:
+def xi_pol_overlap(theta_deg: float = 54.7356,
+                   psi_deg: float = 45.0) -> float:
+    """Polarization overlap |mu_hat . e_cav|^2 of a <111> dipole with a
+    linearly polarized in-plane cavity mode:
     sin^2(theta) (1 + sin 2 psi) / 2, equal to 2/3 at psi = 45 deg for
-    theta = arccos(1/sqrt 3) (a <100>-oriented sample)."""
-    th = np.deg2rad(float(theta_deg))
-    ps = np.deg2rad(float(psi_deg))
+    theta = arccos(1/sqrt 3) (a <100>-oriented sample). Both angles
+    are in degrees and must be finite (since 0.5.0 a NaN or infinite
+    angle is refused instead of returning NaN)."""
+    th, ps = float(theta_deg), float(psi_deg)
+    if not (np.isfinite(th) and np.isfinite(ps)):
+        raise ValueError("theta_deg and psi_deg must be finite angles in "
+                         "degrees")
+    th = np.deg2rad(th)
+    ps = np.deg2rad(ps)
     return float(np.sin(th) ** 2 * (1.0 + np.sin(2.0 * ps)) / 2.0)
 
 

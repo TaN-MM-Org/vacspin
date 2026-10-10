@@ -51,6 +51,7 @@ value can reach the target, instead of returning the boundary.
 from __future__ import annotations
 
 import math
+import numbers
 import warnings
 
 import numpy as np
@@ -462,14 +463,30 @@ def _bisect_increasing(fun, lo, hi, target, tol=1e-6, itmax=80):
     return hi
 
 
-def required_efficiency(target_fidelity, lam, gamma, tau, s=1.0,
-                        leak=0.0, noise_rate=0.0, f0=1.0):
+def _check_target(target_fidelity):
+    ok = (isinstance(target_fidelity, numbers.Real)
+          and not isinstance(target_fidelity, bool)
+          and 0.5 < float(target_fidelity) < 1.0)
+    if not ok:
+        raise ValueError("target_fidelity must be a number in (0.5, 1) "
+                         f"(got {target_fidelity!r})")
+
+
+def required_efficiency(target_fidelity: float, lam: float, gamma: float,
+                        tau: float, s: float = 1.0, leak: float = 0.0,
+                        noise_rate: float = 0.0,
+                        f0: float = 1.0) -> float:
     """The smallest detection efficiency eta reaching the target
     single-shot fidelity, by bisection of the exact model. Refuses --
     with the achievable maximum named -- when even eta = 1 falls
-    short."""
-    if not (0.5 < target_fidelity < 1.0):
-        raise ValueError("target_fidelity must be in (0.5, 1)")
+    short.
+
+    The bisection starts at eta = 1e-6. When that already reaches the
+    target (a target close to 1/2 with a long window or a very high
+    cyclicity), the lower end is moved down by factors of 1000 until
+    it falls short, so the result is the smallest efficiency, not the
+    start of the search (before 0.5.0 it returned 1e-6 there)."""
+    _check_target(target_fidelity)
 
     def f(eta):
         return fidelity(eta, lam, gamma, tau, s, leak, noise_rate,
@@ -481,19 +498,69 @@ def required_efficiency(target_fidelity, lam, gamma, tau, s=1.0,
             f"target fidelity {target_fidelity} is unreachable at this "
             f"operating point: even eta = 1 gives {best:.4f}. Increase "
             "the cyclicity, the window, or reduce the dark counts.")
-    return float(_bisect_increasing(f, 1e-6, 1.0, target_fidelity))
+    hi, lo = 1.0, 1e-6
+    for _ in range(100):
+        if f(lo) < target_fidelity:
+            break
+        hi, lo = lo, lo / 1e3
+    else:                                   # pragma: no cover
+        raise ValueError("no efficiency above 1e-300 falls short of the "
+                         "target; the model cannot resolve it")
+    return float(_bisect_increasing(f, lo, hi, target_fidelity))
 
 
-def required_window(target_fidelity, eta, lam, gamma, s=1.0, leak=0.0,
-                    noise_rate=0.0, f0=1.0, tau_max=1e-2):
+def _peak_near(f, lo, hi, n_scan=64, n_golden=60):
+    """Largest value of f on [lo, hi] (0 < lo < hi): a scan on a
+    logarithmic grid, then a golden-section search in log(tau) between
+    the neighbors of the best scan point. The fidelity is the maximum
+    over thresholds of smooth curves, so it can have more than one
+    local maximum; the scan picks the highest before the golden
+    section refines it. Returns (t_best, f_best)."""
+    ts = np.geomspace(lo, hi, n_scan)
+    vs = [f(t) for t in ts]
+    j = int(np.argmax(vs))
+    best_t, best_f = float(ts[j]), float(vs[j])
+    a = math.log(ts[max(j - 1, 0)])
+    b = math.log(ts[min(j + 1, n_scan - 1)])
+    g = 0.5 * (math.sqrt(5.0) - 1.0)
+    c, d = b - g * (b - a), a + g * (b - a)
+    fc, fd = f(math.exp(c)), f(math.exp(d))
+    for _ in range(n_golden):
+        if fc >= fd:
+            b, d, fd = d, c, fc
+            c = b - g * (b - a)
+            fc = f(math.exp(c))
+        else:
+            a, c, fc = c, d, fd
+            d = a + g * (b - a)
+            fd = f(math.exp(d))
+        for t_, f_ in ((c, fc), (d, fd)):
+            if f_ > best_f:
+                best_t, best_f = math.exp(t_), f_
+    return best_t, best_f
+
+
+def required_window(target_fidelity: float, eta: float, lam: float,
+                    gamma: float, s: float = 1.0, leak: float = 0.0,
+                    noise_rate: float = 0.0, f0: float = 1.0,
+                    tau_max: float = 1e-2) -> float:
     """The shortest readout window reaching the target fidelity.
     Refuses when no window up to tau_max does. With dark counts the
     fidelity is not monotone in tau, so the search scans a logarithmic
     grid from 1 ns upward, stops at the first window that reaches the
     target, and bisects on the rising flank just below it (below 1 ns
-    when the first grid point already reaches the target)."""
-    if not (0.5 < target_fidelity < 1.0):
-        raise ValueError("target_fidelity must be in (0.5, 1)")
+    when the first grid point already reaches the target).
+
+    When no grid point reaches the target, the best part of the grid
+    is searched finely for the peak fidelity before refusing (since
+    0.5.0): a target between the best grid value and the true peak is
+    reachable, and 0.4.0 refused it. The refusal names the peak
+    found."""
+    _check_target(target_fidelity)
+    try:
+        tau_max = float(tau_max)
+    except (TypeError, ValueError):
+        tau_max = float("nan")
     if not (np.isfinite(tau_max) and tau_max > 1e-9):
         raise ValueError("tau_max must be finite and longer than 1 ns")
 
@@ -508,10 +575,21 @@ def required_window(target_fidelity, eta, lam, gamma, s=1.0, leak=0.0,
         if vals[-1] >= target_fidelity:
             break
     else:
-        raise ValueError(
-            f"target fidelity {target_fidelity} is unreachable for any "
-            f"window up to {tau_max} s (best {max(vals):.4f}); improve "
-            "eta or the cyclicity.")
+        # the peak can fall between two grid points: refine around the
+        # best one before refusing
+        j = int(np.argmax(vals))
+        left = taus[j - 1] if j > 0 else taus[0] / 1e3
+        right = taus[min(j + 1, taus.size - 1)]
+        t_pk, f_pk = _peak_near(f, left, right)
+        if f_pk < target_fidelity:
+            raise ValueError(
+                f"target fidelity {target_fidelity} is unreachable for "
+                f"any window up to {tau_max} s (best {f_pk:.4f}, at "
+                f"{t_pk:.4g} s); improve eta or the cyclicity.")
+        lo = taus[j - 1] if j > 0 else taus[0] / 1e3
+        while f(lo) >= target_fidelity:      # only possible for j = 0
+            lo = lo / 1e3
+        return float(_bisect_increasing(f, lo, t_pk, target_fidelity))
     if i == 0:
         # the fidelity tends to 1/2 as tau -> 0, so a shorter window
         # below the target exists; step down until it is found

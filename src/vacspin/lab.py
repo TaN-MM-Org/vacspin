@@ -40,21 +40,36 @@ A set of observations that cannot tell the varied parameters apart is
 refused with an explanation, never silently pseudo-inverted. The
 classic case: zero-field splittings alone can never separate lam from
 ups, because they enter only through sqrt(lam^2 + 4 ups^2).
+
+Since 0.5.0 two more tools check a lab's own data against the model:
+
+* `SpinFit.p_value` and `SpinFit.residuals_ghz`: is the scatter of the
+  measured frequencies about the fit consistent with the stated
+  errors, and which point is off?
+* `fit_readout_histograms`: fit the detection efficiency, cyclicity
+  and background of the readout model (`vacspin.readout`) to measured
+  single-shot photon-count histograms by maximum likelihood, with
+  large-sample error bars and a Pearson goodness-of-fit test.
 """
 from __future__ import annotations
 
 import csv
 import dataclasses
+import math
+from typing import Optional
 
 import numpy as np
 
 from .hamiltonian import h_manifold, lab_to_spin
 from .params import SpinParameters
+from .readout import (_check_background, _check_common,
+                      _exp_poisson_integrals, _switch_on_pmf, poisson_pmf)
 
 __all__ = ["SpinFit", "fit_spin_parameters", "parameter_information",
            "propagate_uncertainty",
            "design_fields", "save_observations_csv",
-           "load_observations_csv"]
+           "load_observations_csv", "ReadoutFit",
+           "fit_readout_histograms"]
 
 _KINDS = ("qubit", "orbital_g", "orbital_e")
 _VARIABLE = ("lam_g", "ups_g", "lam_e", "ups_e", "f_g", "f_e",
@@ -200,6 +215,13 @@ class SpinFit:
         residual scatter instead).
     condition_number : of the information matrix; large means barely
         identifiable.
+    residuals_ghz : measured minus fitted value of each observation
+        (GHz), in input order (since 0.5.0; None for a `SpinFit` built
+        by hand).
+    p_value : (property, since 0.5.0) the probability that a
+        chi-squared variable with `chi2_dof` degrees of freedom is at
+        least `chi2`; None without measurement errors or without spare
+        degrees of freedom.
     """
 
     params: SpinParameters
@@ -212,6 +234,57 @@ class SpinFit:
     condition_number: float
     n_iter: int
     converged: bool
+    residuals_ghz: Optional[np.ndarray] = None
+
+    @property
+    def p_value(self) -> Optional[float]:
+        """Goodness of fit: P(chi2_dof-distributed variable >= chi2).
+
+        A very small value (say below 0.001) means the data scatter
+        about the fitted model by more than the stated `sigmas_ghz`
+        allow: the errors are underestimated, or the model (with the
+        parameters held fixed) does not describe the sample."""
+        if self.chi2 is None or self.chi2_dof is None or self.chi2_dof < 1:
+            return None
+        return _chi2_sf(self.chi2, self.chi2_dof)
+
+
+def _chi2_sf(x, dof):
+    """Survival function P(X >= x) of a chi-squared variable with an
+    integer number of degrees of freedom, from the standard closed
+    forms (the regularized upper incomplete gamma function Q(dof/2,
+    x/2) at integer and half-integer order):
+
+        dof even: exp(-x/2) sum_{j=0}^{dof/2-1} (x/2)^j / j!
+        dof odd:  erfc(sqrt(x/2))
+                  + exp(-x/2) sum_{j=1}^{(dof-1)/2} (x/2)^(j-1/2) / Gamma(j+1/2)
+
+    Terms are summed in log space, so large x underflows to 0 instead
+    of overflowing. The tests check it against exp(-x/2) (dof = 2),
+    erfc(sqrt(x/2)) (dof = 1) and direct numerical integration of the
+    density."""
+    dof = int(dof)
+    x = float(x)
+    if dof < 1:
+        raise ValueError("degrees of freedom must be >= 1")
+    if not np.isfinite(x):
+        raise ValueError("chi-squared value must be finite")
+    if x <= 0.0:
+        return 1.0
+    h = 0.5 * x
+    lh = math.log(h)
+    if dof % 2 == 0:
+        js = np.arange(dof // 2, dtype=float)
+        logs = -h + js * lh - np.array([math.lgamma(j + 1.0) for j in js])
+        total = float(np.sum(np.exp(logs)))
+    else:
+        total = math.erfc(math.sqrt(h))
+        if dof > 1:
+            js = np.arange(1, (dof - 1) // 2 + 1, dtype=float)
+            logs = -h + (js - 0.5) * lh - np.array(
+                [math.lgamma(j + 0.5) for j in js])
+            total += float(np.sum(np.exp(logs)))
+    return min(max(total, 0.0), 1.0)
 
 
 def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
@@ -314,11 +387,14 @@ def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
                    f"measured points (vary={','.join(vary)}); base set: "
                    f"{params0.reference}"))
     err = np.sqrt(np.diag(cov))
+    resid = values - _model_vector(params0, vary, x, kinds, b,
+                                   strain_scale)
     return SpinFit(params=fitted,
                    values={k: float(v) for k, v in zip(vary, x)},
                    sigma={k: float(s) for k, s in zip(vary, err)},
                    cov=cov, chi2=chi2, chi2_dof=chi2_dof, n_points=n,
-                   condition_number=cond, n_iter=it, converged=True)
+                   condition_number=cond, n_iter=it, converged=True,
+                   residuals_ghz=resid)
 
 
 def propagate_uncertainty(fit, func, rel_step=1e-6):
@@ -513,10 +589,12 @@ def load_observations_csv(path):
     Returns (kinds, b_fields_t, values_ghz, sigmas_ghz) with
     sigmas_ghz None when the file has no sigma column. The header and
     every value are checked; a malformed file is refused, not guessed
-    at.
+    at. Since 0.5.0 the file is read as UTF-8 with an optional
+    byte-order mark (spreadsheet programs often add one when they
+    save "CSV UTF-8"), and completely empty lines are skipped.
     """
-    with open(path, newline="") as fh:
-        rows = list(csv.reader(fh))
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        rows = [row for row in csv.reader(fh) if row]
     if not rows:
         raise ValueError("empty observation file")
     header = tuple(rows[0])
@@ -546,3 +624,493 @@ def load_observations_csv(path):
     s_out = np.array(sigs) if has_sigma else None
     _check_inputs(kinds_out, b_out, v_out, s_out, ("lam_g",))
     return kinds_out, b_out, v_out, s_out
+
+
+# ---------------------------------------------------------------------------
+# Readout calibration from your own photon-count histograms (since 0.5.0)
+# ---------------------------------------------------------------------------
+
+_READOUT_VARY = ("eta", "lam", "noise_rate")
+_MIN_SHOTS = 10
+_POOL_MIN_EXPECTED = 5.0
+_MAX_REL_SIGMA = 0.25
+
+
+@dataclasses.dataclass
+class ReadoutFit:
+    """Result of `fit_readout_histograms`.
+
+    values : all three parameters by name ("eta", "lam",
+        "noise_rate"): the fitted values of the varied ones and the
+        held values of the others.
+    sigma : 1-sigma uncertainty of each VARIED parameter, by name.
+    cov : covariance matrix of the varied parameters, in `vary` order.
+    vary : the varied names, in order.
+    log_likelihood : the maximized log-likelihood of the histograms,
+        sum over k of (shots with k counts) log P(k); the constant
+        multinomial factor is left out.
+    chi2, chi2_dof, p_value : Pearson goodness of fit, after pooling
+        neighboring count bins until each expects at least 5 shots
+        (None when no degrees of freedom are left).
+    n_bright_shots, n_dark_shots : shots in each histogram (0 when no
+        dark histogram was given).
+    condition_number : of the scale-free information matrix.
+    n_iter : iterations used.
+    """
+
+    values: dict
+    sigma: dict
+    cov: np.ndarray
+    vary: tuple
+    log_likelihood: float
+    chi2: Optional[float]
+    chi2_dof: Optional[int]
+    p_value: Optional[float]
+    n_bright_shots: int
+    n_dark_shots: int
+    condition_number: float
+    n_iter: int
+
+
+def _convolve_positive(p, q, n):
+    """First n entries of the convolution of two non-negative
+    sequences, by direct summation over the non-zero part of q only.
+    Every term is non-negative, so each entry keeps its relative
+    accuracy, however small it is (an FFT keeps only absolute
+    accuracy, about 1e-16, which is not enough for a likelihood)."""
+    nz = np.nonzero(q[:n])[0]
+    out = np.zeros(n)
+    if nz.size == 0:
+        return out
+    lo, hi = int(nz[0]), int(nz[-1])
+    out[lo:] = np.convolve(p[:n], q[lo:hi + 1])[:n - lo]
+    return out
+
+
+def _histogram_pmfs(eta, lam, noise_rate, gamma, tau, s, leak, kmax):
+    """Bright and dark count pmfs (k = 0..kmax) of the readout model,
+    the same distributions as `vacspin.readout.fidelity`, evaluated
+    for a likelihood: every probability keeps its relative accuracy,
+    including far in the tails. The flip-terminated bright signal is
+
+        P(K = k) = gp T_k + e^{-gp tau} Po(k; c tau),
+        T_k = int_0^tau e^{-gp t} Po(k; c t) dt
+            = (1/a) (c/a)^k P[Po(a tau) >= k + 1],  a = gp + c,
+
+    with c = eta R and gp = R / (lam + 1), evaluated in log space by
+    `_exp_poisson_integrals` (the readout module's recurrence is exact
+    in absolute terms only). The background is then convolved by
+    direct summation. The tests check these pmfs against the readout
+    module's (to 1e-12) and against log-space quadrature in the
+    tails."""
+    r = 0.5 * gamma * s / (1.0 + s)
+    gp = r / (1.0 + lam)
+    c = eta * r
+    signal = gp * _exp_poisson_integrals(gp, c, tau, kmax) \
+        + math.exp(-gp * tau) * poisson_pmf(c * tau, kmax)
+    pb = _convolve_positive(signal, poisson_pmf(noise_rate * tau, kmax),
+                            kmax + 1)
+    n_dark = (noise_rate + eta * leak * r) * tau
+    r_sw = leak * r * lam / (lam + 1.0)
+    if r_sw > 0.0:
+        pd = _convolve_positive(_switch_on_pmf(c, gp, r_sw, tau, kmax),
+                                poisson_pmf(n_dark, kmax), kmax + 1)
+    else:
+        pd = poisson_pmf(n_dark, kmax)
+    return pb, pd
+
+
+def _as_histogram(h, name):
+    """A 1-D array of non-negative whole numbers of shots."""
+    try:
+        a = np.asarray(h, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a 1-D array of shot numbers "
+                         "(entry k = number of shots with k counts)") \
+            from None
+    if a.ndim != 1 or a.size == 0:
+        raise ValueError(f"{name} must be a 1-D array of shot numbers "
+                         "(entry k = number of shots with k counts); "
+                         "from per-shot counts use numpy.bincount")
+    if not np.all(np.isfinite(a)) or np.any(a < 0) \
+            or np.any(a != np.round(a)):
+        raise ValueError(f"{name} entries must be non-negative whole "
+                         "numbers of shots")
+    if a.sum() < _MIN_SHOTS:
+        raise ValueError(f"{name} holds {int(a.sum())} shots; at least "
+                         f"{_MIN_SHOTS} are needed (the error bars are "
+                         "large-sample error bars)")
+    return a
+
+
+def _pooled_pearson(hist, pmf):
+    """Pearson chi2 of one histogram against a pmf covering every count
+    (the tail beyond the histogram is one more bin). Neighboring bins
+    are pooled, from low counts upward, until each expects at least 5
+    shots. Returns (chi2, number of pooled bins)."""
+    n = float(hist.sum())
+    k = hist.size
+    obs = np.concatenate((hist, [0.0]))
+    tail = max(1.0 - float(np.sum(pmf[:k])), 0.0)
+    exp = n * np.concatenate((pmf[:k], [tail]))
+    bins_o, bins_e = [], []
+    acc_o = acc_e = 0.0
+    for o, e in zip(obs, exp):
+        acc_o += o
+        acc_e += e
+        if acc_e >= _POOL_MIN_EXPECTED:
+            bins_o.append(acc_o)
+            bins_e.append(acc_e)
+            acc_o = acc_e = 0.0
+    if bins_e:
+        bins_o[-1] += acc_o
+        bins_e[-1] += acc_e
+    else:
+        bins_o, bins_e = [acc_o], [acc_e]
+    o = np.array(bins_o)
+    e = np.array(bins_e)
+    return float(np.sum((o - e) ** 2 / e)), len(bins_e)
+
+
+def _moment_start(hb, hd, r, tau, eta, lam, noise_rate, vary):
+    """Starting values from the histograms' means and variances.
+
+    Background: the dark mean over tau. Bright signal (background
+    removed): with D = min(T_flip, tau) the bright time and x = Gp tau,
+    mean = c E[D] and variance - mean = c^2 Var(D), where
+    E[D] = tau (1 - e^{-x}) / x and E[D^2] = 2 tau^2 (1 - e^{-x}(1 + x)) / x^2.
+    So (variance - mean) / mean^2 = E[D^2] / E[D]^2 - 1, which rises
+    from 0 (no flips) to 1 (flips always end the record) and fixes x;
+    then c = mean / E[D]. Only a starting point for the likelihood fit:
+    the moments are noisy, so values are clipped into range."""
+    def stats(h):
+        k = np.arange(h.size, dtype=float)
+        n = h.sum()
+        m = float(np.dot(k, h) / n)
+        v = float(np.dot((k - m) ** 2, h) / max(n - 1.0, 1.0))
+        return m, v
+
+    out = {"eta": eta, "lam": lam, "noise_rate": noise_rate}
+    if out["noise_rate"] is None:
+        if "noise_rate" in vary and hd is not None:
+            md, _ = stats(hd)
+            if md <= 0.0:
+                raise ValueError("the dark histogram has no counts, so a "
+                                 "background cannot be fitted; hold "
+                                 "noise_rate fixed (for example at 0)")
+            out["noise_rate"] = md / tau
+        elif "noise_rate" in vary:
+            raise ValueError("to fit noise_rate without a dark histogram, "
+                             "give a positive starting noise_rate (1/s)")
+        else:
+            out["noise_rate"] = 0.0
+    nb = out["noise_rate"] * tau
+    mb, vb = stats(hb)
+    m_s, v_s = mb - nb, vb - nb
+    if out["eta"] is None or out["lam"] is None:
+        if m_s <= 0.0:
+            raise ValueError("the bright histogram's mean count "
+                             f"({mb:.4g}) is not above the background "
+                             f"({nb:.4g}); there is no signal to fit")
+
+        def ed(x):                                   # E[D] / tau
+            return -math.expm1(-x) / x
+
+        def ratio(x):                                # Var(D) / E[D]^2
+            ed2 = 2.0 * (-math.expm1(-x) - x * math.exp(-x)) / (x * x)
+            return ed2 / ed(x) ** 2 - 1.0
+
+        if out["lam"] is None:
+            rho = (v_s - m_s) / (m_s * m_s)
+            lo, hi = 1e-4, 1e3
+            if rho <= ratio(lo):
+                x = lo
+            elif rho >= ratio(hi):
+                x = hi
+            else:
+                for _ in range(100):
+                    mid = math.sqrt(lo * hi)
+                    lo, hi = (mid, hi) if ratio(mid) < rho else (lo, mid)
+                x = math.sqrt(lo * hi)
+            out["lam"] = max(r * tau / x - 1.0, 1e-3)
+        if out["eta"] is None:
+            x = r * tau / (1.0 + out["lam"])
+            out["eta"] = min(max(m_s / (r * tau * ed(x)), 1e-9), 0.99)
+    return out
+
+
+def fit_readout_histograms(bright_hist, gamma: float, tau: float,
+                           s: float = 1.0, dark_hist=None,
+                           eta: Optional[float] = None,
+                           lam: Optional[float] = None,
+                           noise_rate: Optional[float] = None,
+                           leak: float = 0.0, vary=("eta", "lam"),
+                           max_iter: int = 200) -> ReadoutFit:
+    """Fit the readout model to your measured photon-count histograms.
+
+    In a single-shot readout experiment you prepare the bright spin
+    state many times, count the photons detected in a window `tau`
+    each time, and histogram the counts; often you do the same for the
+    dark state. This function finds the detection efficiency `eta`,
+    the cyclicity `lam` and the background `noise_rate` (any subset)
+    that make those histograms most probable under the same count
+    distributions `fidelity` uses (maximum likelihood), with error
+    bars and a goodness-of-fit test.
+
+    bright_hist : histogram of the bright-state shots: entry k is the
+        number of shots with exactly k detected photons (from per-shot
+        counts: ``numpy.bincount(counts)``).
+    gamma : optical decay rate (1/s) and s : saturation parameter of the
+        drive, as in `fidelity`; tau : the counting window (s). They are
+        held fixed: `eta` and the drive enter the counts only through
+        the detected rate eta R, R = (gamma/2) s / (1 + s), so an error
+        in gamma or s moves the fitted eta, not the fit quality.
+    dark_hist : optional histogram of the dark-state shots, fitted
+        jointly; it is what pins down `noise_rate` well.
+    eta, lam, noise_rate : values of the fixed parameters, and
+        optional starting values of the varied ones. A varied parameter
+        left at None starts from the histograms' means and variances
+        (method of moments; `noise_rate` from the dark histogram), which
+        is usually close to the best fit; the likelihood can have more
+        than one maximum, so a poor start can end on a worse one (a
+        tiny `p_value` then shows it). A fixed `eta` or `lam` must be
+        given; a fixed `noise_rate` left at None means no background.
+    leak : the dark spin's off-resonant scattering ratio, held fixed
+        (default 0; see `fidelity`).
+    vary : which of "eta", "lam", "noise_rate" to fit.
+
+    Method: Fisher scoring on the exact log-likelihood (the expected
+    information matrix with central-difference derivatives of the
+    count probabilities). The error bars are the inverse of the
+    expected information at the optimum: the usual large-sample
+    (Cramer-Rao) error bars, which the tests check against closed
+    forms and against simulated experiments.
+
+    Refuses, with the reason: histograms that are not 1-D arrays of
+    whole numbers of shots, or that hold fewer than 10 shots; an
+    unknown or repeated name in `vary`; a fixed `eta` or `lam` without
+    a value; a bright mean count not above the background; a varied
+    `noise_rate` with a dark histogram that has no counts, or with
+    neither a dark histogram nor a starting value; starting values
+    outside the model's range or that give zero probability to an
+    observed count;
+    parameters the data cannot tell apart (for example `lam` when spin
+    flips are rare within the window, so the bright counts are Poisson
+    whatever `lam` is); a fitted parameter whose error bar exceeds a
+    quarter of its value (the likelihood is then too lopsided for
+    large-sample error bars to be reliable); a best fit at the
+    boundary eta = 1 (the counts exceed what gamma, s and tau allow);
+    and a fit that does not converge (`RuntimeError`).
+    """
+    hb = _as_histogram(bright_hist, "bright_hist")
+    hd = None if dark_hist is None else _as_histogram(dark_hist,
+                                                      "dark_hist")
+    vary = tuple(vary)
+    if len(vary) == 0:
+        raise ValueError("vary must name at least one parameter")
+    for name in vary:
+        if name not in _READOUT_VARY:
+            raise ValueError(f"cannot vary {name!r}; choose from "
+                             f"{_READOUT_VARY}")
+    if len(set(vary)) != len(vary):
+        raise ValueError("vary contains a repeated name")
+    for name, v in (("eta", eta), ("lam", lam)):
+        if v is None and name not in vary:
+            raise ValueError(f"{name} is held fixed, so give its value")
+    _check_common(0.5, 1.0, gamma, tau, s)
+    _check_background(leak, 0.0)
+    r = 0.5 * gamma * s / (1.0 + s)
+    full = _moment_start(hb, hd, r, tau, eta, lam, noise_rate, vary)
+    full = {k: float(v) for k, v in full.items()}
+    _check_common(full["eta"], full["lam"], gamma, tau, s)
+    _check_background(leak, full["noise_rate"])
+    if full["eta"] <= 0.0:
+        raise ValueError("eta must start above 0")
+    if "noise_rate" in vary and full["noise_rate"] <= 0.0:
+        raise ValueError("a varied noise_rate must start above 0 (1/s); "
+                         "to fit without background, hold it fixed at 0")
+    k_obs = max(hb.size, 0 if hd is None else hd.size) - 1
+
+    def unpack(x):
+        d = dict(full)
+        d.update({k: float(v) for k, v in zip(vary, x)})
+        return d
+
+    def valid(x):
+        d = unpack(x)
+        return (0.0 < d["eta"] <= 1.0 and d["lam"] > 0.0
+                and np.isfinite(d["lam"]) and d["noise_rate"] >= 0.0
+                and (d["noise_rate"] > 0.0 or "noise_rate" not in vary)
+                and np.isfinite(d["noise_rate"]))
+
+    def pmfs(x):
+        """Both pmfs to a count beyond which less than 1e-9 remains."""
+        d = unpack(x)
+        gp = r / (1.0 + d["lam"])
+        m = (d["eta"] * (d["lam"] + 1.0) * (-math.expm1(-gp * tau))
+             + 2.0 * d["noise_rate"] * tau
+             + d["eta"] * r * tau * (1.0 + leak) * (leak > 0.0))
+        kmax = int(max(k_obs, m + 12.0 * math.sqrt(m + 1.0) + 60))
+        while True:
+            pb, pd = _histogram_pmfs(d["eta"], d["lam"], d["noise_rate"],
+                                     gamma, tau, s, leak, kmax)
+            if 1.0 - pb.sum() < 1e-9 and 1.0 - pd.sum() < 1e-9:
+                return pb, pd
+            if kmax >= (1 << 18):
+                raise ValueError("count distributions too wide to "
+                                 "evaluate (more than 2^18 counts)")
+            kmax = min(2 * kmax, 1 << 18)
+
+    def loglik(pb, pd):
+        total = 0.0
+        for h, p in ((hb, pb), (hd, pd)):
+            if h is None:
+                continue
+            nz = h > 0
+            pk = p[:h.size][nz]
+            if np.any(pk <= 0.0):
+                return -np.inf
+            total += float(np.sum(h[nz] * np.log(pk)))
+        return total
+
+    def score_info(x):
+        """Score vector and expected information matrix at x."""
+        pb, pd = pmfs(x)
+        size_b, size_d = pb.size, pd.size
+        dpb, dpd = [], []
+        for j in range(len(x)):
+            hj = 1e-5 * abs(x[j])
+            xp, xm = x.copy(), x.copy()
+            xp[j] += hj
+            xm[j] -= hj
+            if valid(xp):
+                denom = 2.0 * hj
+            else:                       # eta at 1: one-sided step
+                xp, denom = x.copy(), hj
+            pbp, pdp = pmfs(xp)
+            pbm, pdm = pmfs(xm)
+            n_b = min(pbp.size, pbm.size, size_b)
+            n_d = min(pdp.size, pdm.size, size_d)
+            dpb.append((pbp[:n_b] - pbm[:n_b]) / denom)
+            dpd.append((pdp[:n_d] - pdm[:n_d]) / denom)
+        p_dim = len(x)
+        u = np.zeros(p_dim)
+        info = np.zeros((p_dim, p_dim))
+        for h, p, dp in ((hb, pb, dpb), (hd, pd, dpd)):
+            if h is None:
+                continue
+            n_k = min(len(dpj) for dpj in dp)
+            g = np.array([dpj[:n_k] for dpj in dp])        # (p, n_k)
+            pk = p[:n_k]
+            # counts with probability below 1e-10 carry a negligible
+            # share of the information, and there the pmf's round-off
+            # (about 1e-16 absolute) would dominate its derivative
+            ok = pk > 1e-10
+            w = np.zeros(n_k)
+            w[ok] = 1.0 / pk[ok]
+            info += float(h.sum()) * (g * w) @ g.T
+            # the score uses every observed count, as the likelihood does
+            m_k = min(h.size, n_k)
+            seen = (h[:m_k] > 0) & (pk[:m_k] > 0.0)
+            u += g[:, :m_k][:, seen] @ (h[:m_k][seen] / pk[:m_k][seen])
+        return u, info, (pb, pd)
+
+    x = np.array([full[k] for k in vary], dtype=float)
+    pb, pd = pmfs(x)
+    ll = loglik(pb, pd)
+    if not np.isfinite(ll):
+        gp0 = r / (1.0 + full["lam"])
+        m_model = (full["eta"] * (full["lam"] + 1.0)
+                   * (-math.expm1(-gp0 * tau)) + full["noise_rate"] * tau)
+        m_data = float(np.dot(np.arange(hb.size), hb) / hb.sum())
+        raise ValueError(
+            "the starting values give zero probability to an observed "
+            "count; start closer. The model's mean bright count "
+            "eta (lam + 1)(1 - exp(-R tau / (lam + 1))) + noise_rate tau "
+            f"is {m_model:.4g} at the start, the measured mean is "
+            f"{m_data:.4g}")
+    u, info, _ = score_info(x)
+    singular_msg = ("these histograms cannot determine "
+                    f"{', '.join(vary)} together (singular information "
+                    "matrix). With rare spin flips in the window the "
+                    "bright counts do not depend on lam: hold lam fixed, "
+                    "or use a longer window")
+    ok, _, _, _ = _invert_information(info, vary)
+    if not ok:
+        raise ValueError(singular_msg)
+    converged = False
+    it = 0
+    for it in range(1, max_iter + 1):
+        d = np.sqrt(np.diag(info))
+        step = None
+        if np.all(np.isfinite(d)) and np.all(d > 0.0):
+            try:
+                step = np.linalg.solve(info / np.outer(d, d), u / d) / d
+            except np.linalg.LinAlgError:
+                step = None
+        if step is None or not np.all(np.isfinite(step)):
+            raise ValueError(singular_msg)
+        alpha, moved = 1.0, False
+        for _ in range(60):
+            x_new = x + alpha * step
+            if valid(x_new):
+                pb_n, pd_n = pmfs(x_new)
+                ll_new = loglik(pb_n, pd_n)
+                if ll_new >= ll - 1e-12 * abs(ll):
+                    moved = True
+                    break
+            alpha *= 0.5
+        if not moved:
+            converged = True            # no ascent direction left
+            break
+        dx = x_new - x
+        gain = ll_new - ll
+        x, ll = x_new, ll_new
+        u, info, _ = score_info(x)
+        # converged when the step is negligible, or when both the step
+        # and the likelihood gain are at the round-off level
+        if np.all(np.abs(dx) <= 1e-9 * np.abs(x)) or (
+                gain <= 1e-12 * abs(ll)
+                and np.all(np.abs(dx) <= 1e-6 * np.abs(x))):
+            converged = True
+            break
+    if not converged:
+        raise RuntimeError("readout fit did not converge; check gamma, s "
+                           "and tau, start closer, or hold a poorly "
+                           "determined parameter fixed")
+    fitted = unpack(x)
+    if fitted["eta"] > 1.0 - 1e-6:
+        raise ValueError("the best fit sits at the boundary eta = 1: the "
+                         "bright counts exceed what gamma, s and tau "
+                         "allow. Check those inputs")
+    ok, cond, cov, sig = _invert_information(info, vary)
+    if not ok:
+        raise ValueError(singular_msg)
+    weak = [k for k in vary if sig[k] > _MAX_REL_SIGMA * abs(fitted[k])]
+    if weak:
+        found = ", ".join(f"{k} = {fitted[k]:.4g} +/- {sig[k]:.2g}"
+                          for k in weak)
+        raise ValueError(
+            f"poorly determined: {found}. When an error bar exceeds a "
+            "quarter of the value, the likelihood is too lopsided for "
+            "large-sample error bars to be reliable. Hold that "
+            "parameter fixed, or collect more shots (for lam: use a "
+            "window with more spin flips, tau near (lam + 1) / R)")
+    # goodness of fit
+    pb, pd = pmfs(x)
+    chi2, bins = _pooled_pearson(hb, pb)
+    dof = bins - 1
+    if hd is not None:
+        c2, bd = _pooled_pearson(hd, pd)
+        chi2 += c2
+        dof += bd - 1
+    dof -= len(vary)
+    if dof >= 1:
+        p_val = _chi2_sf(chi2, dof)
+    else:
+        chi2, dof, p_val = None, None, None
+    return ReadoutFit(values=fitted, sigma=sig, cov=cov, vary=vary,
+                      log_likelihood=float(ll), chi2=chi2, chi2_dof=dof,
+                      p_value=p_val, n_bright_shots=int(hb.sum()),
+                      n_dark_shots=0 if hd is None else int(hd.sum()),
+                      condition_number=cond, n_iter=it)
