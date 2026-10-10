@@ -11,7 +11,8 @@ what its source states:
   (arXiv:2306.13199), with the ab initio orbital-quenching reduction
   factors of G. Thiering and A. Gali, Phys. Rev. X 8, 021063 (2018),
   and the emission budget of Rosenthal et al., arXiv:2403.13110
-  (lifetime, quantum efficiency) with the Debye-Waller factor of
+  (Phys. Rev. X 14, 041008 (2024)) (lifetime, quantum efficiency)
+  with the Debye-Waller factor of
   Goerlitz et al., New J. Phys. 22, 013048 (2020) and the C/D
   branching ratio of Lee et al., arXiv:2511.05740. This set is validated against measured numbers in
   the test suite (zero-field splittings, qubit frequency, cyclicity,
@@ -26,7 +27,7 @@ what its source states:
   work.
 
 * `gev_bhaskar2017`: the germanium-vacancy (GeV-) centre, measured
-  unstrained orbital splittings of M. K. Bhaskar et al., Phys. Rev.
+  orbital splittings of M. K. Bhaskar et al., Phys. Rev.
   Lett. 118, 223603 (2017) (arXiv:1612.03036): 152 GHz ground,
   981 GHz excited, 602 nm zero-phonon line. As for SiV-, strain and
   orbital quenching are sample-specific and deliberately NOT shipped
@@ -220,9 +221,11 @@ def siv_hepp2014(theta_rad=None, phi_rad=None) -> SpinParameters:
 
 
 def gev_bhaskar2017(theta_rad=None, phi_rad=None) -> SpinParameters:
-    """GeV- measured unstrained values of Bhaskar et al., PRL 118,
-    223603 (2017): orbital splittings 152 GHz (ground) and 981 GHz
-    (excited), zero-phonon line 602 nm. Strain and orbital quenching
+    """GeV- measured values of Bhaskar et al., PRL 118, 223603 (2017):
+    orbital splittings 152 GHz (ground) and 981 GHz (excited),
+    zero-phonon line 602 nm. The paper does not report the strain of
+    its emitters; this set treats the splittings as pure spin-orbit.
+    Strain and orbital quenching
     are sample-specific and NOT shipped: this set carries ups = 0 and
     f = delta = 0, stated here on purpose (Siyushev et al., PRB 96,
     081201(R) (2017) measured 170 GHz on a strained emitter, about
@@ -241,7 +244,7 @@ def gev_bhaskar2017(theta_rad=None, phi_rad=None) -> SpinParameters:
         f_g=0.0, f_e=0.0, delta_g=0.0, delta_e=0.0,
         theta_rad=theta_rad, phi_rad=phi_rad,
         reference="Bhaskar et al., PRL 118, 223603 (2017): measured "
-                  "unstrained splittings 152/981 GHz, ZPL 602 nm; "
+                  "splittings 152/981 GHz, ZPL 602 nm; "
                   "strain and orbital quenching deliberately not "
                   "shipped (sample-specific; cf. Siyushev et al., "
                   "PRB 96, 081201(R) (2017)) -- supply measured "

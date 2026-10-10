@@ -12,7 +12,8 @@ Methodological basis: T. M. Mahim, M. M. Rahman and A. S. M. Mohsin,
 "Fast single-shot readout of tin-vacancy spins with an overcoupled
 diamond nanocavity on thin-film lithium niobate" (submitted to Optics
 Express, 2026), and the effective-Hamiltonian and readout formalism of
-Rosenthal et al., PRX 13, 031022 (2023) and arXiv:2403.13110.
+Rosenthal et al., PRX 13, 031022 (2023) and PRX 14, 041008 (2024)
+(arXiv:2403.13110).
 """
 from .params import (EmissionBudget, SpinParameters, gev_bhaskar2017,
                      siv_hepp2014, snv_emission, snv_rosenthal2023)
@@ -32,7 +33,7 @@ from .lab import (ReadoutFit, SpinFit, design_fields,
                   load_observations_csv, parameter_information,
                   propagate_uncertainty, save_observations_csv)
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",

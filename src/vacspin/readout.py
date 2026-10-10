@@ -1,7 +1,8 @@
 """Single-shot spin readout: exact counting statistics, honest limits.
 
 Implements the two-level readout model of Rosenthal et al.,
-arXiv:2403.13110, Appendix A (Eqs. A6-A20), generalized to any
+arXiv:2403.13110 (Phys. Rev. X 14, 041008 (2024)), Appendix A
+(Eqs. A6-A20), generalized to any
 cavity-coupled centre this package can describe.
 
 The physical picture: drive the spin-conserving (bright) transition at

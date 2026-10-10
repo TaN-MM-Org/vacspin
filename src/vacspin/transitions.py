@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .hamiltonian import GAMMA_GHZ_PER_T, lab_to_spin, solve
+from .hamiltonian import GAMMA_GHZ_PER_T, h_manifold, lab_to_spin, solve
 from .params import SpinParameters
 
 __all__ = ["transition_strength", "transition_table", "cyclicity",
@@ -102,14 +102,30 @@ def cyclicity(params: SpinParameters, b_lab, strain_scale=1.0,
 
 
 def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
-              strain_scale=1.0):
+              strain_scale=1.0, full_zeeman: bool = False) -> float:
     """Microwave Rabi rate Omega/2pi (GHz) between the two lowest
     ground states for a drive field b_drive_lab (tesla, lab frame):
-    |<g1| H_drive |g0>| with the spin-Zeeman drive Hamiltonian
-    (Rosenthal Eqs. B10-B11)."""
+    |<g1| H_drive |g0>|.
+
+    By default H_drive is the spin-Zeeman drive Hamiltonian of
+    Rosenthal et al., PRX 13, 031022 (2023), Eqs. B10-B11. That
+    equation assumes f_g = 0 and delta_g = 0 (the paper says so), so
+    the drive leaves out the g-factor anisotropy (1 + 2 delta_g) and
+    the orbital Zeeman term f_g that the static Hamiltonian has.
+
+    full_zeeman=True (new in 0.6.0) uses the full ground-state Zeeman
+    terms of the static Hamiltonian (`h_manifold` with the drive field)
+    for the drive too. For the SnV- set this changes the rate by a few
+    percent for typical drive directions, and by more for a drive
+    along the symmetry axis (see the README). Which form describes
+    your device is a modelling choice; the default keeps the published
+    one."""
     eg, vg, ee, ve = solve(params, b_lab, strain_scale)
     bs = lab_to_spin(b_drive_lab, params.theta_rad, params.phi_rad)
-    bx, by, bz = bs
-    zee = np.array([[bz, bx - 1j * by], [bx + 1j * by, -bz]])
-    h_mw = 0.5 * GAMMA_GHZ_PER_T * np.kron(_I2, zee)
+    if full_zeeman:
+        h_mw = h_manifold(0.0, 0.0, 0.0, params.f_g, params.delta_g, bs)
+    else:
+        bx, by, bz = bs
+        zee = np.array([[bz, bx - 1j * by], [bx + 1j * by, -bz]])
+        h_mw = 0.5 * GAMMA_GHZ_PER_T * np.kron(_I2, zee)
     return float(abs(np.vdot(vg[:, 1], h_mw @ vg[:, 0])))

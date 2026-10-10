@@ -1,20 +1,37 @@
 """The cavity-coupled interface: transition-resolved Purcell budget.
 
 Everything between the spin and the detector, in the bad-cavity
-(Purcell) regime, following the transition-resolved conventions of
-Lee et al., arXiv:2511.05740 (Eqs. 1-10) as used by Mahim et al.
-(Optics Express, 2026) for the SnV-on-TFLN interface:
+(Purcell) regime. The decay-rate budget follows Lee et al.,
+arXiv:2511.05740: the coupled transition C decays F_C times faster
+than in bulk (their Eq. 2), with the Debye-Waller factor eta_DW and the
+branching ratio eta_BR (their Eq. 3), and the polarization overlap of
+the dipole with the cavity field (their Eqs. 6-10). The quantum
+efficiency eta_q, the ideal Purcell factor F_max and the position
+overlap are added as in the SnV-on-TFLN study of Mahim et al.
+(submitted to Optics Express, 2026):
 
     F_max = (3 / 4 pi^2) (lam/n)^3 Q_L / V         ideal Purcell factor
     F_C   = 1 + (F_max - 1) xi_pol xi_pos          the coupled transition
     F_C2  = same, suppressed by the cavity Lorentzian at the qubit
             detuning (the spin-flipping partner)
-    zeta  = 1 + eta_q eta_DW eta_BR (F_C - 1)      lifetime reduction
-    beta  = eta_q eta_DW eta_BR F_C / zeta         photons into the mode
+    a     = eta_q eta_DW eta_BR                    radiative fraction of C
+    C     = a (F_C - 1)                            cooperativity
+    zeta  = 1 + C                                  lifetime reduction
+    beta  = C / (1 + C) = a (F_C - 1) / zeta       photons into the mode
     eta   = beta eta_wg T_link eta_chip eta_det    detected per decay
     Lambda_cav = Lambda_0 zeta / zeta_flip         cavity-boosted cyclicity
-    g     = (1/2) sqrt(F_C kappa gamma_rad,C)      coupling rate, so that
-            F_C = 4 g^2 / (kappa gamma_rad,C) holds as an identity
+    g     = (1/2) sqrt((F_C - 1) kappa gamma_rad,C)  coupling rate, so that
+            F_C - 1 = 4 g^2 / (kappa gamma_rad,C) holds as an identity
+
+F_C counts the whole emission of transition C with the cavity present.
+Only the added part, (F_C - 1) times the bulk rate, goes into the
+cavity mode; the bulk part still goes where it went without the
+cavity. So with no overlap (xi = 0) beta, g and C are exactly 0.
+Before 0.6.0 beta used F_C instead of F_C - 1 (and g likewise), which
+counted the bulk emission of C as cavity photons: beta was 0.342, not
+0, with no overlap, and the design point of the study above gave
+eta = 0.649 instead of 0.615. That form is still available as
+``beta_form="transition"``.
 
 with V in units of (lam/n)^3 and kappa = f_cav / Q_L. In the g formula
 all three rates are in the same units: g_hz and kappa_hz are in Hz, and
@@ -102,6 +119,10 @@ class CavityInterface:
         transition (e.g. the D line); when given, its Purcell factor
         F_partner and the selectivity condition kappa < delta are
         reported.
+    beta_form : "purcell" (default since 0.6.0) counts only the
+        cavity-added emission, (F_C - 1), as photons into the mode.
+        "transition" reproduces vacspin 0.5.0 and earlier, which used
+        F_C for beta, g and the cooperativity.
 
     Everything is computed in __init__; `validity` holds the regime
     checks and `require_valid()` refuses when any fails.
@@ -110,7 +131,7 @@ class CavityInterface:
     def __init__(self, q_loaded, v_rel, eta_wg, budget: EmissionBudget,
                  lambda0, omega_q_hz, xi_pol, xi_pos=1.0,
                  t_link=1.0, eta_chip=1.0, eta_det=1.0,
-                 delta_partner_hz=None):
+                 delta_partner_hz=None, beta_form: str = "purcell"):
         for name, v in (("eta_wg", eta_wg), ("xi_pol", xi_pol),
                         ("xi_pos", xi_pos), ("t_link", t_link),
                         ("eta_chip", eta_chip), ("eta_det", eta_det)):
@@ -130,6 +151,11 @@ class CavityInterface:
             raise ValueError("delta_partner_hz must be positive and "
                              "finite (the partner line's detuning "
                              "from the cavity, Hz)")
+        if beta_form not in ("purcell", "transition"):
+            raise ValueError('beta_form must be "purcell" (the default) '
+                             'or "transition" (the form used before '
+                             f'0.6.0), not {beta_form!r}')
+        self.beta_form = beta_form
         self.q = float(q_loaded)
         self.v = float(v_rel)
         self.budget = budget
@@ -147,15 +173,18 @@ class CavityInterface:
         self.gamma_cav = budget.gamma0 * self.zeta        # 1/s
         self.tau_cav_s = 1.0 / self.gamma_cav
         self.lambda_cav = float(lambda0) * self.zeta / zeta_flip
-        self.beta = a * self.f_c / self.zeta
+        # the cavity-mode share of transition C's enhanced emission
+        f_mode = self.f_c - 1.0 if beta_form == "purcell" else self.f_c
+        self.beta = a * f_mode / self.zeta
         self.eta_wg = float(eta_wg)
         self.eta = (self.beta * self.eta_wg * float(t_link)
                     * float(eta_chip) * float(eta_det))
-        # coupling rate defined so F_C = 4 g^2 / (kappa gamma_rad,C),
-        # every rate in Hz: the decay rates (1/s) become linewidths
-        # gamma / (2 pi) in Hz, as in the bad-cavity check below
+        # coupling rate defined so F_C - 1 = 4 g^2 / (kappa gamma_rad,C)
+        # (F_C for beta_form="transition"), every rate in Hz: the decay
+        # rates (1/s) become linewidths gamma / (2 pi) in Hz, as in the
+        # bad-cavity check below
         gamma_rad_c_hz = budget.gamma0 * a / (2.0 * np.pi)
-        self.g_hz = 0.5 * np.sqrt(self.f_c * self.kappa_hz
+        self.g_hz = 0.5 * np.sqrt(f_mode * self.kappa_hz
                                   * gamma_rad_c_hz)
         self.cooperativity = (4.0 * self.g_hz ** 2
                               / (self.kappa_hz * budget.gamma0
