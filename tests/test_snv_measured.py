@@ -86,3 +86,43 @@ def test_strain_engineering_moves_the_splitting():
         eg, _, _, _ = solve(P, [0.0, 0.0, 0.0], strain_scale=s)
         want = zero_field_splitting(P.lam_g, s * P.ups_g)
         assert abs((eg[2] - eg[0]) - want) < 1e-9 * max(want, 1.0)
+
+
+def test_rabi_rate_full_zeeman_option():
+    """full_zeeman=True (0.6.0) drives with the same Zeeman terms as
+    the static Hamiltonian. Checks: (1) with f_g = delta_g = 0 it is
+    the published spin-Zeeman drive (Rosenthal Eq. B10 assumes exactly
+    that) to rounding; (2) it equals the matrix element of
+    H(b0 + b_d) - H(b0), built from the full ground Hamiltonian at two
+    fields, which is exact because H is linear in B; (3) the default
+    is unchanged, and for the SnV- set the two forms differ by -3.6 %
+    (lab x drive) to +4.1 % (lab y drive), and by +18.8 % for a drive
+    along the symmetry axis."""
+    import dataclasses
+
+    from vacspin.hamiltonian import h_manifold, lab_to_spin
+    b0 = field_on_circle(147.0, 0.125)
+    bare = dataclasses.replace(P, f_g=0.0, delta_g=0.0)
+    ax = np.array([np.sin(P.theta_rad) * np.cos(P.phi_rad),
+                   np.sin(P.theta_rad) * np.sin(P.phi_rad),
+                   np.cos(P.theta_rad)])
+    drives = [np.array(d) for d in ([6e-4, 0, 0], [0, 6e-4, 0],
+                                    [0, 0, 6e-4], [3e-4, -2e-4, 4e-4])]
+    drives.append(6e-4 * ax)
+    for d in drives:
+        a = rabi_rate(bare, b0, d)
+        b = rabi_rate(bare, b0, d, full_zeeman=True)
+        assert abs(a - b) < 1e-13 * a
+        _, vg, _, _ = solve(P, b0)
+        h0 = h_manifold(P.lam_g, P.ups_g, 0.0, P.f_g, P.delta_g,
+                        lab_to_spin(b0, P.theta_rad, P.phi_rad))
+        h1 = h_manifold(P.lam_g, P.ups_g, 0.0, P.f_g, P.delta_g,
+                        lab_to_spin(b0 + d, P.theta_rad, P.phi_rad))
+        ref = abs(np.vdot(vg[:, 1], (h1 - h0) @ vg[:, 0]))
+        full = rabi_rate(P, b0, d, full_zeeman=True)
+        assert abs(full - ref) < 1e-9 * ref
+    ratio = [rabi_rate(P, b0, d, full_zeeman=True) / rabi_rate(P, b0, d)
+             - 1.0 for d in drives]
+    assert abs(ratio[0] + 0.0355) < 5e-4
+    assert abs(ratio[1] - 0.0409) < 5e-4
+    assert abs(ratio[4] - 0.1877) < 5e-4

@@ -1,4 +1,4 @@
-"""Cavity-interface anchors: the Purcell identity F_C = 4 g^2 /
+"""Cavity-interface anchors: the Purcell identity F_C - 1 = 4 g^2 /
 (kappa gamma_rad) as an exact round trip, exact Lorentzian limits,
 the photon-budget bounds beta <= 1 and eta <= 1 with monotonicity,
 cavity-boosted cyclicity limits, and the validity refusal."""
@@ -21,13 +21,17 @@ def _ci(q=500.0, **kw):
 
 def test_purcell_formula_and_identity():
     """F_max = (3/4pi^2) Q/V exactly, and the coupling rate satisfies
-    F_C = 4 g^2 / (kappa gamma_rad,C) as an identity."""
+    F_C - 1 = 4 g^2 / (kappa gamma_rad,C) as an identity (F_C with
+    beta_form="transition", the form used before 0.6.0)."""
     assert abs(purcell_max(4.0 * np.pi ** 2 / 3.0, 1.0) - 1.0) < 1e-12
     ci = _ci()
     # every rate in Hz: the radiative decay rate as a linewidth
     gamma_rad_c_hz = BUD.gamma0 * BUD.radiative_fraction / (2.0 * np.pi)
     f_from_g = 4.0 * ci.g_hz ** 2 / (ci.kappa_hz * gamma_rad_c_hz)
-    assert abs(f_from_g - ci.f_c) < 1e-9 * ci.f_c
+    assert abs(f_from_g - (ci.f_c - 1.0)) < 1e-9 * ci.f_c
+    old = _ci(beta_form="transition")
+    f_from_g = 4.0 * old.g_hz ** 2 / (old.kappa_hz * gamma_rad_c_hz)
+    assert abs(f_from_g - old.f_c) < 1e-9 * old.f_c
 
 
 def test_lorentzian_exact_limits():
@@ -116,12 +120,48 @@ def test_coupling_rate_in_consistent_hz_units():
     by 2 pi. Before 0.3.1 the code multiplied kappa in Hz by gamma in
     1/s, which made g_hz too large by sqrt(2 pi) and made the
     weak-coupling check stricter than stated. The cooperativity is
-    unit-free and must equal F_C times the radiative fraction."""
-    ci = _ci()
+    unit-free and must equal F_C - 1 times the radiative fraction
+    (F_C times it with beta_form="transition")."""
     a = BUD.radiative_fraction
-    kappa_ang = 2.0 * np.pi * ci.kappa_hz            # rad/s
-    gamma_rad_ang = BUD.gamma0 * a                   # 1/s
-    g_ang = 0.5 * np.sqrt(ci.f_c * kappa_ang * gamma_rad_ang)
-    assert abs(ci.g_hz - g_ang / (2.0 * np.pi)) < 1e-12 * ci.g_hz
-    assert abs(ci.cooperativity - ci.f_c * a) < 1e-12 * ci.cooperativity
+    for form, f_mode in (("purcell", lambda c: c.f_c - 1.0),
+                         ("transition", lambda c: c.f_c)):
+        ci = _ci(beta_form=form)
+        kappa_ang = 2.0 * np.pi * ci.kappa_hz            # rad/s
+        gamma_rad_ang = BUD.gamma0 * a                   # 1/s
+        g_ang = 0.5 * np.sqrt(f_mode(ci) * kappa_ang * gamma_rad_ang)
+        assert abs(ci.g_hz - g_ang / (2.0 * np.pi)) < 1e-12 * ci.g_hz
+        assert abs(ci.cooperativity - f_mode(ci) * a) < \
+            1e-12 * ci.cooperativity
     assert ci.validity["weak_coupling"] == (ci.g_hz < ci.kappa_hz / 10.0)
+
+
+def test_only_the_cavity_added_emission_goes_into_the_mode():
+    """Since 0.6.0 (beta_form="purcell"): transition C decays F_C times
+    faster than in bulk (Lee et al., arXiv:2511.05740, Eq. 2), and only
+    the added part (F_C - 1) goes into the cavity mode. With C = a (F_C
+    - 1) the budget obeys the bad-cavity relations zeta = 1 + C and
+    beta = C / (1 + C), and with no overlap beta, g and C are exactly
+    0. In 0.5.0 beta used F_C: 0.342 (the radiative fraction a) with
+    no overlap, and 0.9093 instead of 0.8622 at Q_L = 500."""
+    a = BUD.radiative_fraction
+    for q in (10.0, 500.0, 1e5):
+        ci = _ci(q=q)
+        c = a * (ci.f_c - 1.0)
+        assert abs(ci.cooperativity - c) < 1e-12 * c
+        assert abs(ci.zeta - (1.0 + c)) < 1e-12
+        assert abs(ci.beta - c / (1.0 + c)) < 1e-12
+    none = _ci(xi_pos=0.0)
+    assert none.f_c == 1.0
+    assert none.beta == 0.0 and none.g_hz == 0.0
+    assert none.cooperativity == 0.0 and none.eta == 0.0
+    old = _ci(xi_pos=0.0, beta_form="transition")
+    assert abs(old.beta - a) < 1e-15
+    new, old = _ci(), _ci(beta_form="transition")
+    assert abs(old.beta - a * old.f_c / old.zeta) < 1e-15
+    assert abs(new.beta - 0.8622) < 5e-5 and abs(old.beta - 0.9093) < 5e-5
+    # everything that does not involve the mode share is the same
+    for name in ("f_max", "f_c", "f_c2", "zeta", "gamma_cav",
+                 "lambda_cav", "kappa_hz"):
+        assert getattr(new, name) == getattr(old, name)
+    with pytest.raises(ValueError, match="beta_form"):
+        _ci(beta_form="total")

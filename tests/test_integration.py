@@ -3,7 +3,10 @@ study (Mahim, Rahman and Mohsin, Optics Express (2026), submitted; the
 open pipeline at Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface) from
 its stated inputs -- the overcoupled Q_L = 500 diamond nanocavity on
 TFLN: F_C ~ 19, end-to-end efficiency ~ 0.65, single-shot fidelity
-above 98% in a 100 ns window. The chain runs spin model -> cavity ->
+above 98% in a 100 ns window. The study's efficiency counts the whole
+enhanced emission of the coupled line as cavity photons (beta_form=
+"transition"); the default since 0.6.0 counts only the cavity-added
+part and gives 0.615. The chain runs spin model -> cavity ->
 readout with no numbers passed by hand between stages."""
 import numpy as np
 
@@ -15,7 +18,7 @@ P = snv_rosenthal2023()
 BUD = snv_emission()
 
 
-def _paper_interface():
+def _paper_interface(beta_form="purcell"):
     """The paper's design point, from ITS stated inputs: Q_L = 500,
     V = 0.68 (lam/n)^3, xi_pos = 0.5, taper transfer 0.991, chip 0.8,
     detector 0.9, eta_wg = 1 - Q_L/Q_i with Q_i = 1.39e6 -- and the
@@ -34,14 +37,19 @@ def _paper_interface():
         q_loaded=500.0, v_rel=0.68, eta_wg=1.0 - 500.0 / 1.39e6,
         budget=BUD, lambda0=lam0, omega_q_hz=omega_q,
         xi_pol=xi_pol_overlap(), xi_pos=0.5,
-        t_link=0.991, eta_chip=0.8, eta_det=0.9), omega_q
+        t_link=0.991, eta_chip=0.8, eta_det=0.9,
+        beta_form=beta_form), omega_q
 
 
 def test_design_point_reproduced():
     ci, _ = _paper_interface()
     assert abs(ci.f_c - 19.0) < 0.05 * 19.0       # paper: F_C ~ 19
-    assert abs(ci.eta - 0.65) < 0.05 * 0.65       # paper: eta ~ 65%
     ci.require_valid()                            # in-regime by design
+    old, _ = _paper_interface("transition")
+    assert abs(old.eta - 0.65) < 0.05 * 0.65      # paper: eta ~ 65%
+    # the default differs only by the mode share: (F_C - 1) / F_C
+    assert abs(ci.eta / old.eta - (ci.f_c - 1.0) / ci.f_c) < 1e-12
+    assert abs(ci.eta - 0.6150) < 5e-5 and abs(old.eta - 0.6486) < 5e-5
 
 
 def test_fast_readout_fidelity():
@@ -51,8 +59,10 @@ def test_fast_readout_fidelity():
     Since 0.4.0 the dark switch-on channel is evaluated exactly (the
     source pipeline used a 9-point quadrature, vacspin 0.3 a 24-point
     sum); the numbers sit on the conservative side of the paper's
-    98.5%: 0.9813 at the best of the four windows (0.9818 in 0.3.1),
-    0.9488 at a full 100 ns with f0 = 0.99 (0.9512 in 0.3.1)."""
+    98.5%: 0.9802 at the best of the four windows (0.9813 in 0.5.0,
+    whose efficiency used F_C rather than F_C - 1; 0.9818 in 0.3.1),
+    0.9481 at a full 100 ns with f0 = 0.99 (0.9488 in 0.5.0, 0.9512 in
+    0.3.1)."""
     ci, omega_q = _paper_interface()
     s = 2.0
     gamma_cav_hz = ci.gamma_cav / (2.0 * np.pi)
