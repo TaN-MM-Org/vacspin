@@ -94,6 +94,11 @@ def test_input_refusals():
         purcell_max(-1.0, 1.0)
     with pytest.raises(ValueError):
         lorentzian_suppression(1.0, -5.0, 100.0)
+    for bad in (np.nan, np.inf):
+        with pytest.raises(ValueError, match="finite"):
+            xi_pol_overlap(theta_deg=bad)
+        with pytest.raises(ValueError, match="finite"):
+            xi_pol_overlap(psi_deg=bad)
 
 
 def test_partner_selectivity_reporting():

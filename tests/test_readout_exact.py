@@ -12,7 +12,8 @@ import warnings
 import numpy as np
 import pytest
 
-from vacspin import fidelity, poisson_pmf, required_window, snv_emission
+from vacspin import (fidelity, poisson_pmf, required_efficiency,
+                     required_window, snv_emission)
 from vacspin.readout import _switch_on_pmf
 
 GAMMA0 = snv_emission().gamma0
@@ -247,3 +248,75 @@ def test_leak_counts_only_in_the_dark_state():
         assert abs(nd - out["n_dark"]) < 1e-12 * nd
         diff = nb - out["n_bright_total"]
         assert abs(diff - eta * leak * r * tau) < 1e-12 * nb
+
+
+def _p0_flip_terminated(c, gp, tau):
+    """P(no signal photon) for Poisson counts at rate c that stop at an
+    Exp(gp) flip time: gp/(gp + c) (1 - e^{-(gp+c) tau}) + e^{-(gp+c) tau},
+    written from the process."""
+    a = gp + c
+    return gp / a * (-math.expm1(-a * tau)) + math.exp(-a * tau)
+
+
+def test_required_window_finds_a_peak_between_grid_points():
+    """With few counts the best threshold is 1, so with background rate
+    N the fidelity has the closed form
+    F(tau) = 1/2 + e^{-N tau} (1 - P0(tau)) / 2: it rises, peaks and
+    falls. A target between the best value on the 60-point search grid
+    and the true peak is reachable, but 0.4.0 refused it as
+    unreachable (best 0.7217 on the grid; the peak is 0.72183). The
+    shortest window must now equal the closed-form crossing on the
+    rising flank (to 1e-5 relative)."""
+    eta, lam, s, noise, tau_max = 5e-4, 2244.0, 10.0, 4000.0, 1e-2
+    r = 0.5 * GAMMA0 * s / (1.0 + s)
+    gp, c = r / (1.0 + lam), eta * r
+
+    def f_closed(t):
+        return 0.5 + 0.5 * math.exp(-noise * t) \
+            * (1.0 - _p0_flip_terminated(c, gp, t))
+
+    dense = np.geomspace(1e-7, tau_max, 200001)
+    fd = np.array([f_closed(t) for t in dense])
+    j = int(np.argmax(fd))
+    grid_best = max(f_closed(t) for t in np.geomspace(1e-9, tau_max, 60))
+    target = 0.5 * (grid_best + fd[j])
+    assert grid_best < target < fd[j]
+    tau = required_window(target, eta=eta, lam=lam, gamma=GAMMA0, s=s,
+                          noise_rate=noise, tau_max=tau_max)
+    lo, hi = 1e-7, float(dense[j])            # closed-form crossing
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if f_closed(mid) < target else (lo, mid)
+    assert abs(tau - hi) < 1e-5 * hi
+    out = fidelity(eta, lam, GAMMA0, tau, s=s, noise_rate=noise)
+    assert out["threshold"] == 1
+    assert abs(out["fidelity"] - f_closed(tau)) < 1e-12
+    assert out["fidelity"] >= target
+
+
+def test_required_efficiency_below_the_search_start():
+    """Without background or leak the best threshold is 1 and
+    F(eta) = 1 - P0(eta R) / 2 in closed form. For a cyclicity of 10^6
+    and a 0.1 s window, eta = 1e-6 already gives F = 0.816, so the
+    smallest efficiency for 0.7 lies below the old search start: 0.4.0
+    returned 1e-6, the closed form gives 6.668e-7 (to 1e-5 relative)."""
+    lam, tau, s, target = 1e6, 0.1, 1.0, 0.7
+    r = 0.5 * GAMMA0 * s / (1.0 + s)
+    gp = r / (1.0 + lam)
+    eta = required_efficiency(target, lam=lam, gamma=GAMMA0, tau=tau, s=s)
+    lo, hi = 1e-12, 1e-6
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        f_mid = 1.0 - 0.5 * _p0_flip_terminated(mid * r, gp, tau)
+        lo, hi = (mid, hi) if f_mid < target else (lo, mid)
+    assert abs(eta - hi) < 1e-5 * hi
+    assert eta < 1e-6
+    assert fidelity(eta, lam, GAMMA0, tau, s=s)["fidelity"] >= target
+
+
+def test_target_fidelity_must_be_a_number():
+    for bad in (0.5, 1.0, np.nan, "0.9"):
+        with pytest.raises(ValueError, match="target_fidelity"):
+            required_window(bad, eta=0.3, lam=100.0, gamma=GAMMA0)
+        with pytest.raises(ValueError, match="target_fidelity"):
+            required_efficiency(bad, lam=100.0, gamma=GAMMA0, tau=1e-6)

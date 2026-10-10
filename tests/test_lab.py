@@ -219,6 +219,26 @@ def test_csv_round_trip_exact_and_refusals(tmp_path):
         load_observations_csv(bad)
 
 
+def test_csv_from_a_spreadsheet_loads(tmp_path):
+    """A file saved as "CSV UTF-8" by a spreadsheet starts with a
+    byte-order mark and may end with empty lines. Since 0.5.0 it loads
+    to exactly the values written (0.4.0 refused the header)."""
+    kinds, fields = _design(n=3)
+    values = np.array([_observe(P, k, b, 1.0)
+                       for k, b in zip(kinds, fields)])
+    plain = tmp_path / "plain.csv"
+    save_observations_csv(plain, kinds, fields, values)
+    sheet = tmp_path / "sheet.csv"
+    sheet.write_bytes(b"\xef\xbb\xbf" + plain.read_bytes() + b"\r\n\r\n")
+    k2, b2, v2, s2 = load_observations_csv(sheet)
+    assert k2 == kinds and s2 is None
+    assert np.array_equal(b2, fields) and np.array_equal(v2, values)
+    blank = tmp_path / "blank.csv"
+    blank.write_text("\n\n")
+    with pytest.raises(ValueError, match="empty"):
+        load_observations_csv(blank)
+
+
 def test_input_refusals():
     kinds, fields = _design(n=4)
     values = np.zeros(4)
