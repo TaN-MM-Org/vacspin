@@ -27,6 +27,9 @@ optics around it, the package answers questions such as:
   able to determine them at all?
 - With those error bars, how uncertain is any number predicted from
   the fitted centre (a qubit frequency at a new field, a cyclicity)?
+- From your own single-shot photon-count histograms, what are the
+  detection efficiency, cyclicity and background of your setup, with
+  error bars, and does the model describe the data at all?
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -150,7 +153,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.4.0. The cavity, detector, attempt-rate and
+printed with vacspin 0.5.0. The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -419,6 +422,8 @@ for name in ("lam_g", "ups_g"):
     print(f"{name}: {fit.values[name]:.2f} +/- {fit.sigma[name]:.2f} GHz "
           f"(true {getattr(truth, name):.2f})")
 print(f"chi2 = {fit.chi2:.2f} for {fit.chi2_dof} degrees of freedom")
+print(f"p-value {fit.p_value:.2f}; largest residual "
+      f"{max(abs(fit.residuals_ghz)):.3f} GHz")
 my_sample = fit.params                           # usable everywhere
 print(my_sample.reference[:60] + "...")
 ```
@@ -431,6 +436,7 @@ chosen points: [1, 0, 5, 3]
 lam_g: 824.35 +/- 8.88 GHz (true 830.15)
 ups_g: 201.49 +/- 9.09 GHz (true 195.44)
 chi2 = 3.19 for 4 degrees of freedom
+p-value 0.53; largest residual 0.063 GHz
 fitted by vacspin.lab.fit_spin_parameters to 6 measured poin...
 ```
 
@@ -443,7 +449,13 @@ both only through `sqrt(lam^2 + 4 ups^2)`; the planner says so, and
 explanation. The error bars come from the standard weighted
 least-squares covariance. A `chi2` close to the number of degrees of
 freedom (measurements minus fitted parameters) means the fit matches
-the data within the stated measurement errors. `design_fields` adds points one at a time,
+the data within the stated measurement errors. `fit.p_value` (since
+0.5.0) makes this a number: the probability of a `chi2` at least this
+large if the model and the stated errors are right. A value below
+about 0.001 means they are not: the errors are too small, or a
+parameter you held fixed is wrong. `fit.residuals_ghz` lists measured
+minus fitted values, point by point, so you can see which point is
+off. `design_fields` adds points one at a time,
 each time taking the one that most increases the determinant of the
 information matrix (greedy D-optimal design); this is a good
 heuristic, not a proof of the best possible subset. Observation
@@ -487,6 +499,90 @@ The ground splitting is known far better than `lam_g` and `ups_g`
 separately, because the fit pins down the combination
 `sqrt(lam^2 + 4 ups^2)` directly; `cov` in the result carries such
 correlations.
+
+### 7. Calibrate the readout from your own count histograms
+
+In a readout experiment you prepare the spin many times, count the
+photons in each window, and histogram the counts.
+`fit_readout_histograms` (new in 0.5.0) finds the detection efficiency
+`eta`, the cyclicity `lam` and the background `noise_rate` that make
+your histograms most probable under the same count distributions that
+`fidelity` uses. It returns error bars and a goodness-of-fit test.
+
+```python
+import numpy as np
+import vacspin as vs
+
+gamma = vs.snv_emission().gamma0       # optical decay rate, 1/s
+tau, s = 20e-6, 10.0                   # counting window (s), drive
+
+# Stand-in for your data: photon counts of 5000 shots prepared bright
+# and 5000 prepared dark. Here they are simulated (eta = 0.2 %,
+# cyclicity 2244, background 4000 counts/s); use your own instead.
+rng = np.random.default_rng(7)
+r = 0.5 * gamma * s / (1 + s)                       # scattering rate
+t_flip = rng.exponential((1 + 2244.0) / r, 5000)    # when the spin flips
+bright = (rng.poisson(0.002 * r * np.minimum(t_flip, tau))
+          + rng.poisson(4000 * tau, 5000))
+dark = rng.poisson(4000 * tau, 5000)
+
+fit = vs.fit_readout_histograms(
+    np.bincount(bright), gamma, tau, s, dark_hist=np.bincount(dark),
+    vary=("eta", "lam", "noise_rate"))
+v, e = fit.values, fit.sigma
+print(f"eta:        {100 * v['eta']:.3f} +/- {100 * e['eta']:.3f} %")
+print(f"lam:        {v['lam']:.0f} +/- {e['lam']:.0f}")
+print(f"noise_rate: {v['noise_rate']:.0f} +/- {e['noise_rate']:.0f} counts/s")
+print(f"chi2 = {fit.chi2:.1f} for {fit.chi2_dof} degrees of freedom, "
+      f"p-value {fit.p_value:.2f}")
+
+# The fidelity these numbers predict for a 50 us window
+out = vs.fidelity(v["eta"], v["lam"], gamma, 50e-6, s=s,
+                  noise_rate=v["noise_rate"])
+print(f"predicted fidelity at 50 us: {out['fidelity']:.3f}")
+```
+
+```
+eta:        0.200 +/- 0.003 %
+lam:        2272 +/- 104
+noise_rate: 3988 +/- 199 counts/s
+chi2 = 8.8 for 10 degrees of freedom, p-value 0.55
+predicted fidelity at 50 us: 0.842
+```
+
+The fit recovers the simulated values within its error bars. Each
+histogram is an array whose entry `k` is the number of shots with
+exactly `k` counts; `numpy.bincount` turns per-shot counts into one.
+The fit starts from the means and variances of the histograms (you
+can pass your own starting values as `eta`, `lam` and `noise_rate`;
+for a parameter you hold fixed, they give its value).
+The optical decay rate `gamma`, the saturation parameter `s` and the
+window `tau` are inputs you know, not fitted. The efficiency and the
+drive enter the counts only through the detected rate `eta R` (with
+`R = (gamma/2) s / (1 + s)`), so an error in `gamma` or `s` shows up
+in the fitted `eta`, not in the fit quality.
+
+What the fit can and cannot tell:
+
+- The cyclicity shows in the counts only through spin flips during
+  the window. If flips are rare (window much shorter than
+  `(lam + 1) / R`), the bright counts hardly depend on `lam`. The fit
+  then refuses to vary it: it says that the parameters cannot be told
+  apart, or that `lam` is poorly determined (an error bar above a
+  quarter of the value, where large-sample error bars are not
+  reliable). Hold `lam` fixed, or use a longer window.
+- The dark histogram is what pins down the background. Without it,
+  the background can only be fitted from the bright histogram, which
+  determines it far less well; you then have to give a starting
+  `noise_rate`, or hold it fixed at a value you measured separately.
+- The error bars are large-sample (Cramer-Rao) error bars. The tests
+  check them against the exact answers of the Poisson and geometric
+  limits and against 300 simulated experiments.
+- A small `p_value` (below about 0.001) means the model does not
+  describe your histograms. A common cause is imperfect spin
+  preparation, which gives extra shots with background counts only.
+  The test suite shows that 20 % failed preparations among 5000 shots
+  give a p-value below 10^-6.
 
 ## Cited parameter sets
 
@@ -633,13 +729,23 @@ Appendix A)
 - `fit_spin_parameters` -- fit any of the ten spin parameters to your
   measured frequencies; returns a `SpinFit` with `params` (a ready
   `SpinParameters` whose `reference` records the fit and the base set),
-  `values`, `sigma`, `cov`, `chi2`, `chi2_dof` and more.
+  `values`, `sigma`, `cov`, `chi2`, `chi2_dof` and more. Since 0.5.0 it
+  also has `p_value` (the goodness of fit) and `residuals_ghz`
+  (measured minus fitted values).
 - `propagate_uncertainty` -- after fitting: the value and error bar
   (and covariance) of any quantity computed from the fitted
   parameters, by first-order error propagation.
 - `save_observations_csv`, `load_observations_csv` -- a plain CSV
   format for observation records (columns `kind, bx_t, by_t, bz_t,
-  value_ghz` and optionally `sigma_ghz`).
+  value_ghz` and optionally `sigma_ghz`). Since 0.5.0 the loader also
+  reads files that a spreadsheet saved as "CSV UTF-8" (with a
+  byte-order mark) and skips empty lines.
+- `fit_readout_histograms` (new in 0.5.0): fit `eta`, `lam` and
+  `noise_rate` (any subset) to your bright and dark photon-count
+  histograms by maximum likelihood; returns a `ReadoutFit` with
+  `values`, `sigma`, `cov`, `log_likelihood`, and a Pearson goodness
+  of fit (`chi2`, `chi2_dof`, `p_value`, after pooling count bins until
+  each expects at least 5 shots).
 
 `__version__` gives the installed version.
 
@@ -684,11 +790,23 @@ Appendix A)
   its range, a fit that does not converge (`RuntimeError`), a CSV
   file with a wrong header, a short row, a non-numeric value or no
   data, or (in `propagate_uncertainty`) a function that returns a
-  non-finite value or slope.
+  non-finite value or slope;
+- in `fit_readout_histograms`: a histogram that is not a 1-D array of
+  whole numbers of shots, or holds fewer than 10 shots; an unknown or
+  repeated name in `vary`; a fixed `eta` or `lam` without a value; a
+  bright mean count not above the background; a background to fit with
+  no dark counts, or with neither a dark histogram nor a starting
+  value; starting values that give zero probability to an observed
+  count; parameters the histograms cannot tell apart; a fitted value
+  whose error bar is more than a quarter of the value; a best fit at
+  `eta = 1`; or a fit that does not converge (`RuntimeError`);
+- a target fidelity that is not a real number (since 0.5.0, for
+  example the string `"0.9"`), or a polarization angle in
+  `xi_pol_overlap` that is not finite.
 
 ## How the results are checked
 
-84 automated tests run on every push and pull request, on Python 3.9,
+101 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -805,6 +923,17 @@ checks, with the tolerances the tests actually use:
 - `readout_counts` and `fidelity` differ, as documented, only by the
   leak counts `eta leak R tau` in the bright mean (to 1e-12 relative;
   zero without leak).
+- `required_window` when the fidelity peaks between two points of its
+  search grid: with few counts the best threshold is 1 and the
+  fidelity has the closed form `1/2 + e^(-N tau) (1 - P0(tau)) / 2`
+  (`N` the background rate, `P0` the probability of no signal
+  photon). For a target between the best grid value and the true
+  peak, the returned window equals the closed-form crossing (to 1
+  part in 10^5); 0.4.0 refused the target.
+- `required_efficiency` below its search start of `eta = 1e-6`:
+  without background the fidelity is `1 - P0(eta)/2` in closed form,
+  and the returned efficiency equals the closed-form one (to 1 part in
+  10^5); 0.4.0 returned 1e-6.
 
 **The source study's design point** (Q = 500 cavity, from the study's
 stated inputs, with the qubit frequency computed by the package)
@@ -853,13 +982,66 @@ stated inputs, with the qubit frequency computed by the package)
   error raised by your own function reaches you instead of being
   hidden.
 
+**Readout calibration from your histograms** (`fit_readout_histograms`,
+since 0.5.0)
+
+- Poisson limit (no spin flips, no background): the fitted `eta` is
+  the mean count divided by `R tau`, and its error bar is
+  `sqrt(mean / N) / (R tau)` for `N` shots (both to 1 part in 10^6).
+- Bright and dark histograms in the Poisson limit: the fitted `eta`
+  and background, and their full covariance, equal the closed forms
+  from the two Poisson means (to 1 part in 10^6).
+- Geometric limit (spin flips always end the record): the fitted
+  `eta` is the mean count divided by `lam + 1`, with the geometric
+  error bar `sqrt(m (1 + m) / N) / (lam + 1)` (to 1 part in 10^6).
+- 300 simulated experiments of 2000 shots each, simulated from the
+  counting process itself and fitted from the automatic start: the
+  spread of (fit minus truth) / error bar is within 15 % of 1 for
+  both `eta` and `lam`, its mean within 0.25, and the goodness-of-fit
+  p-value is above 0.01 in at least 95 % of them.
+- A wrong model is caught: with 20 % failed preparations among 5000
+  bright shots the p-value is below 10^-6, while correctly prepared
+  shots give a p-value above 0.01.
+- The fit's count distributions equal those `fidelity` uses (to
+  1e-12), and keep their relative accuracy far in the tail, where
+  they are below 10^-17 (against log-space numerical integration, to
+  1 part in 10^6).
+- The automatic start returns the true `eta`, `lam` and background
+  from the exact expected histogram (to 1 part in 10^6).
+- The chi-squared tail probability equals `erfc(sqrt(x/2))` and
+  `exp(-x/2)` for one and two degrees of freedom (to 1e-14) and the
+  numerically integrated density for 3, 4, 7, 10 and 31 (to 1e-9).
+- `SpinFit.residuals_ghz` equals the measured values minus
+  `qubit_frequency` of the fitted parameters (to 1e-9 GHz), and
+  `SpinFit.p_value` with two degrees of freedom equals
+  `exp(-chi2/2)` (to 1e-14).
+- A CSV file with a byte-order mark and trailing empty lines loads to
+  exactly the values written.
+
 **Inputs**
 
 - NaN and infinite values are refused across the parameter classes,
   the cavity, readout and remote-entanglement functions (with array
-  input to `polarization_rate` still accepted).
+  input to `polarization_rate` still accepted), and since 0.5.0 by
+  `xi_pol_overlap`; a target fidelity must be a real number.
 
 ## Corrections in earlier versions
+
+**0.5.0 fixed two problems in the inverse readout tools.** Both only
+changed answers in edge cases; every other result is unchanged.
+
+- `required_window` scans 60 windows, each about 31 % longer than the
+  last, and refused when none of them reached the target. But the
+  fidelity can peak between two of them. For the confocal readout of
+  example 3 the best grid value is 0.8757 (at 18.7 us), while the
+  true peak is 0.8763 (at 16.8 us), so a target of 0.876 was refused
+  as unreachable. The function now searches finely around the best
+  grid point before refusing, and returns 15.52 us for that target.
+- `required_efficiency` started its search at `eta = 1e-6` and
+  returned 1e-6 whenever that already reached the target, instead of
+  the smallest efficiency. For cyclicity 10^6, a 0.1 s window and a
+  target of 0.7 it returned 1e-6; the closed form, and now the
+  function, give 6.668e-7.
 
 **0.4.0 fixed four problems in the readout model and the inputs.**
 
@@ -948,6 +1130,14 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   and are not part of the model.
 - **SiV- and GeV- ship without strain, quenching or emission budget**;
   supply or fit your own.
+- **The readout calibration** (`fit_readout_histograms`) holds
+  `gamma`, `s`, `tau` and `leak` fixed, and its error bars are
+  large-sample error bars: they assume many shots, and the fit
+  refuses a parameter whose error bar exceeds a quarter of its value.
+  It describes the same two-state counting model as `fidelity`, so
+  effects outside that model (failed preparation, detector dead time,
+  drifts during the run) show up as a small `p_value`, not as a
+  correction.
 - **The `lab` fits** use a local Levenberg-Marquardt search (a standard
   step-by-step least-squares method) from your starting set; the error
   bars assume independent Gaussian measurement errors, and the greedy

@@ -4,6 +4,76 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.5.0 (2026-10-10)
+
+Readout calibration from a lab's own photon-count histograms, a
+goodness-of-fit test for both fits, and two fixes in the inverse
+readout tools.
+
+### Added
+
+- `fit_readout_histograms` and `ReadoutFit` (`vacspin.lab`, exported
+  at top level): fit the detection efficiency `eta`, the cyclicity
+  `lam` and the background `noise_rate` (any subset) to measured
+  bright and, optionally, dark single-shot count histograms by
+  maximum likelihood, using the same count distributions as
+  `fidelity`. Fisher scoring from a method-of-moments start;
+  large-sample error bars (inverse expected information); a Pearson
+  goodness-of-fit test with bins pooled to at least 5 expected shots.
+  It refuses malformed histograms, fewer than 10 shots, parameters
+  the data cannot tell apart, an error bar above a quarter of the
+  fitted value, a best fit at eta = 1, and non-convergence. Tests:
+  closed-form maximum-likelihood values and error bars in the Poisson
+  limit, the joint bright/dark Poisson limit (full covariance) and the
+  geometric limit (to 1e-6 relative); 300 experiments simulated from
+  the counting process (pull spread within 15 % of 1); a wrong model
+  (20 % failed preparations) gives p < 1e-6; the likelihood's count
+  distributions equal `fidelity`'s to 1e-12 and keep relative accuracy
+  in the far tail (log-space quadrature, 1e-6 relative); the
+  moment start recovers exact parameters.
+- `SpinFit.p_value` (chi-squared tail probability of the fit) and
+  `SpinFit.residuals_ghz` (measured minus fitted values). The new
+  field has a default, so a `SpinFit` built by hand as before still
+  works. Tests: residuals against `qubit_frequency` (1e-9 GHz);
+  p-value against exp(-chi2/2) for 2 degrees of freedom (1e-14); the
+  chi-squared tail function against erfc and numerical integration.
+- README example 7 (readout calibration) and a p-value line in
+  example 5.
+
+### Fixed
+
+- `required_window` refused a reachable target when the fidelity
+  peaks between two points of its 60-point search grid. Confocal
+  readout of example 3 (eta 0.002, Lambda 2244, s = 10, background
+  4000/s, tau_max 1 s), target 0.876: before, `ValueError` "unreachable
+  (best 0.8757)"; after, 15.52 us (the peak is 0.8763 at 16.8 us). It
+  now searches finely (log-spaced scan plus golden section) around
+  the best grid point before refusing. Test:
+  `test_required_window_finds_a_peak_between_grid_points` (closed-form
+  threshold-1 fidelity; the returned window equals the closed-form
+  crossing to 1e-5 relative).
+- `required_efficiency` returned its search start eta = 1e-6 whenever
+  that already reached the target. Lambda = 1e6, gamma = 1/(4.5 ns),
+  tau = 0.1 s, s = 1, target 0.7: before 1e-6, after 6.668e-7
+  (closed form 6.668e-7). The
+  lower end now moves down by factors of 1000 until it falls short.
+  Test: `test_required_efficiency_below_the_search_start`.
+
+### Changed
+
+- `required_window` and `required_efficiency` refuse a target
+  fidelity that is not a real number with a `ValueError` naming it
+  (a string such as "0.9" raised `TypeError` before).
+- `xi_pol_overlap` refuses a NaN or infinite angle (it returned NaN).
+- `load_observations_csv` reads the file as UTF-8 with an optional
+  byte-order mark and skips empty lines, so a file saved by a
+  spreadsheet as "CSV UTF-8" loads (its header was refused before).
+- Type hints on `required_window`, `required_efficiency`,
+  `xi_pol_overlap` and the new functions.
+- Documentation: README sections for the new tools, their checks and
+  refusals; test count 101 (84 before). No other result changes: the
+  README examples 1 to 6 print the same numbers as in 0.4.0.
+
 ## v0.4.0 - 2026-09-30
 
 Exact readout statistics for both spin states, error bars on anything
