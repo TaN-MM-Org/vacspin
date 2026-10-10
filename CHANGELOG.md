@@ -4,6 +4,64 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.6.0 (2026-10-10)
+
+The photon share of the cavity mode now counts only the emission the
+cavity adds, an opt-in full-Zeeman microwave drive, and citation
+corrections.
+
+### Changed
+
+- `CavityInterface`: `beta`, `g_hz` and `cooperativity` now use
+  `F_C - 1` instead of `F_C`. The coupled line decays `F_C` times faster
+  with the cavity than without it (Lee et al., arXiv:2511.05740, Eq. 2);
+  only the added part goes into the cavity mode, while its normal
+  emission still goes where it went before. With no overlap at all
+  (`xi_pos = 0`), 0.5.0 gave `beta = 0.342` (the radiative fraction) and
+  a nonzero `g`; both are now exactly 0. The budget now obeys the
+  bad-cavity relations `zeta = 1 + C` and `beta = C / (1 + C)`. For
+  README example 2, `beta` goes from 0.909 to 0.862, `eta` from 0.648 to
+  0.614, `g` from 7.52 to 7.32 GHz and the cooperativity from 6.60 to
+  6.26; the 50 ns fidelity printed there goes from 0.99966 to 0.99964.
+  For the companion study's design point (test suite), `eta` goes from
+  0.6486 to 0.6150 and the best-window fidelity from 0.9813 to 0.9802.
+  `f_max`, `f_c`, `f_c2`, `zeta`, `gamma_cav`, `lambda_cav` and
+  `kappa_hz` are unchanged. `beta_form="transition"` gives the 0.5.0
+  numbers. Test: `test_only_the_cavity_added_emission_goes_into_the_mode`.
+
+### Added
+
+- `rabi_rate(..., full_zeeman=True)`: drives with the same Zeeman terms
+  as the static Hamiltonian, including the orbital factor `f_g` and the
+  anisotropy `(1 + 2 delta_g)`. The default is unchanged: the
+  spin-Zeeman drive of Rosenthal et al., PRX 13, 031022 (2023), Eq. B10,
+  which the paper writes with `f_g = delta_g = 0`. For the SnV- set at
+  the readout field and a 0.6 mT drive, the full form changes the rate
+  by -3.6 % (lab x), +4.1 % (lab y), +1.7 % (lab z) and +18.8 % (along
+  the symmetry axis). Test: `test_rabi_rate_full_zeeman_option` (equal
+  to the default with no orbital or anisotropy terms, and equal to the
+  matrix element of `H(b0 + b_drive) - H(b0)`).
+
+### Fixed (documentation)
+
+- `cavity.py` said it followed Lee et al. "Eqs. 1-10". Lee et al.
+  give the decay-rate budget (Eqs. 1-3) and the polarization overlap
+  (Eqs. 6-10); the quantum efficiency, the ideal Purcell factor and the
+  position overlap are not in that paper. The text now says which part
+  comes from where.
+- `gev_bhaskar2017`: the splittings were called "unstrained", but
+  Bhaskar et al., PRL 118, 223603 (2017) do not report the strain of
+  their emitters. The word is removed, and the docstring says the set
+  treats the splittings as pure spin-orbit. The numbers are unchanged.
+- Rosenthal et al., arXiv:2403.13110 is now also cited by its journal
+  version, Phys. Rev. X 14, 041008 (2024).
+- Packaging: the license is now given as the SPDX expression
+  `license = "Apache-2.0"` with `license-files = ["LICENSE"]`, and the
+  old license table and license classifier are gone. Building no longer
+  prints setuptools' deprecation warnings (their support ends on
+  2027-02-18). Building from source now needs setuptools 77 or newer;
+  installing the package is unchanged.
+
 ## 0.5.0 (2026-10-10)
 
 Readout calibration from a lab's own photon-count histograms, a

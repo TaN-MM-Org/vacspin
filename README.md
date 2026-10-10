@@ -102,8 +102,10 @@ number that looks fine but is not.
   In the **bad-cavity, weak-coupling** regime this package covers, both
   `g` and the centre's own decay are much slower than `kappa`, so the
   cavity simply speeds up the emission. The **cooperativity**
-  `4 g^2 / (kappa gamma)` measures the same speed-up; here it equals the
-  Purcell factor times the radiative fraction.
+  `C = 4 g^2 / (kappa gamma)` measures the same speed-up; here it equals
+  the Purcell factor minus one, times the radiative fraction. The
+  lifetime shortens by `1 + C`, and the share of photons that go into
+  the cavity mode is `C / (1 + C)`.
 - **Detection efficiency** (`eta`) -- the fraction of emission events
   that end as a click on the detector, after every loss on the way.
 - **Single-shot readout fidelity** -- the probability that one
@@ -202,7 +204,12 @@ difference is consistent with the field in the experiment being about
 
 `transition_table(spin, b)` gives the energies and strengths of all 16
 transitions, and `rabi_rate(spin, b, b_drive)` the microwave Rabi rate
-in GHz.
+in GHz. By default the drive uses the spin-Zeeman term only, as in
+Rosenthal et al. (their Eq. B10 sets the orbital factor and the g-factor
+anisotropy to zero). `rabi_rate(..., full_zeeman=True)` keeps both, as
+the static Hamiltonian does. For the SnV- set at this field and a
+0.6 mT drive, that changes the rate by -3.6 % (drive along lab x),
++4.1 % (lab y), +1.7 % (lab z) and +18.8 % (along the symmetry axis).
 
 ### 2. The cavity budget and a fast readout
 
@@ -237,13 +244,22 @@ print(f"fidelity in 50 ns: {out['fidelity']:.5f} "
 ```
 Purcell factor F_C:      19.29
 lifetime shortened by:   7.26x  (0.620 ns)
-photons into the mode:   0.909
-detected per decay, eta: 0.648
+photons into the mode:   0.862
+detected per decay, eta: 0.614
 cavity linewidth kappa:  968.6 GHz
-coupling rate g:         7.52 GHz
+coupling rate g:         7.32 GHz
 regime checks: {'spin_selectivity': True, 'bad_cavity': True, 'weak_coupling': True}
-fidelity in 50 ns: 0.99966 (threshold 1 photon, mean bright count 17.31)
+fidelity in 50 ns: 0.99964 (threshold 1 photon, mean bright count 16.41)
 ```
+
+Only the part of the emission that the cavity adds goes into the
+mode. The coupled line decays `F_C` times faster than without the
+cavity; its normal emission (the "1" in `F_C`) still goes where it
+went before, so `beta` uses `F_C - 1`. With no overlap
+(`xi_pos=0`) `beta`, `g` and the cooperativity are exactly 0. Before
+0.6.0 `beta` and `g` used `F_C`, which gave `beta = 0.342` with no
+overlap and `eta = 0.648` here. The companion study reports that
+number (about 65 %); `beta_form="transition"` gives it back.
 
 `xi_pol` and `xi_pos` say how well the centre's dipole lines up with
 the cavity field in direction and position (each from 0 to 1);
@@ -671,11 +687,13 @@ gives its inputs, units and conventions.
 - `cyclicity` -- the cyclicity of the lowest ground state on the lower
   (`manifold="lower"`) or upper excited pair; infinite when the
   spin-flip line is exactly dark.
-- `rabi_rate` -- the microwave Rabi rate (GHz) for a drive field.
+- `rabi_rate` -- the microwave Rabi rate (GHz) for a drive field;
+  `full_zeeman=True` adds the orbital and anisotropy Zeeman terms to
+  the drive.
 - `field_on_circle` -- a field of given size at an angle in one lab
   plane.
 
-**Cavity** (`vacspin.cavity`; conventions of Lee et al.,
+**Cavity** (`vacspin.cavity`; decay-rate budget of Lee et al.,
 arXiv:2511.05740)
 
 - `purcell_max` -- the ideal Purcell factor `(3 / 4 pi^2) Q / V`.
@@ -690,7 +708,8 @@ arXiv:2511.05740)
   `cooperativity`, the `validity` checks, `require_valid()` and
   `summary()`. An optional `delta_partner_hz` adds the Purcell factor
   of a competing same-spin line and a check that the cavity is
-  narrower than their spacing.
+  narrower than their spacing. `beta_form="transition"` gives the
+  `beta`, `g` and cooperativity of version 0.5.0 and earlier.
 
 **Readout** (`vacspin.readout`; Rosenthal et al., arXiv:2403.13110,
 Appendix A)
@@ -764,7 +783,8 @@ Appendix A)
 - a cavity's `Q` or `V` is not positive and finite, an efficiency or
   overlap is outside [0, 1], the bare cyclicity is not finite and
   positive, or the qubit frequency or `delta_partner_hz` is not
-  positive and finite;
+  positive and finite, or `beta_form` is not `"purcell"` or
+  `"transition"`;
 - `require_valid()` finds the interface outside the bad-cavity,
   weak-coupling or spin-selective regime (and, when
   `delta_partner_hz` is given, the partner-selectivity condition); it
@@ -806,7 +826,7 @@ Appendix A)
 
 ## How the results are checked
 
-101 automated tests run on every push and pull request, on Python 3.9,
+103 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -839,6 +859,10 @@ checks, with the tolerances the tests actually use:
 - The Rabi rate is zero without a drive, exactly doubles when the
   drive doubles (to 1 part in 10^12), and lies between 1 and 20 MHz for
   a 0.6 mT drive (measured: about 6.25 MHz).
+- With `full_zeeman=True` and no orbital or anisotropy terms, the Rabi
+  rate equals the default one (to 1 part in 10^13). With them, it
+  equals the matrix element of `H(b0 + b_drive) - H(b0)` built from
+  the full ground Hamiltonian at two fields (to 1 part in 10^9).
 - The Hamiltonian built from precomputed matrices (since 0.4.0, for
   speed) equals the term-by-term construction for 50 random inputs
   (to 1e-12 GHz).
@@ -863,10 +887,15 @@ checks, with the tolerances the tests actually use:
 
 - `purcell_max` gives exactly 1 for `Q/V = 4 pi^2 / 3` (to 1e-12),
   and the coupling
-  rate satisfies `F_C = 4 g^2 / (kappa gamma_rad)` with every rate in Hz
-  (to 1 part in 10^9); `g_hz` also equals the angular-unit value
-  divided by 2 pi and the cooperativity equals `F_C` times the
-  radiative fraction (to 1 part in 10^12).
+  rate satisfies `F_C - 1 = 4 g^2 / (kappa gamma_rad)` with every rate
+  in Hz (to 1 part in 10^9); `g_hz` also equals the angular-unit value
+  divided by 2 pi and the cooperativity equals `F_C - 1` times the
+  radiative fraction (to 1 part in 10^12). The same holds with `F_C`
+  for `beta_form="transition"`.
+- The budget obeys `zeta = 1 + C` and `beta = C / (1 + C)` (to 1e-12)
+  at Q = 10, 500 and 10^5; with no overlap `beta`, `g`, `C` and `eta`
+  are exactly 0, and the old form gives `beta` equal to the radiative
+  fraction. The two forms differ only in `beta`, `g`, `C` and `eta`.
 - The Lorentzian (the cavity's response versus detuning) is 1 on
   resonance, 1/2 at `delta = kappa/2` (to
   1e-12), and below 1e-9 far away; the polarisation overlap is 2/3 (to
@@ -938,8 +967,10 @@ checks, with the tolerances the tests actually use:
 **The source study's design point** (Q = 500 cavity, from the study's
 stated inputs, with the qubit frequency computed by the package)
 
-- Purcell factor within 5 % of 19 and detection efficiency within 5 %
-  of 0.65, inside the valid regime.
+- Purcell factor within 5 % of 19, inside the valid regime. With
+  `beta_form="transition"` (the study's form) the detection efficiency
+  is within 5 % of the study's 0.65 (0.6486); the default gives 0.6150,
+  smaller by exactly `(F_C - 1) / F_C`.
 - With a computed off-resonant leak and a 1000 counts/s background:
   fidelity above 98 % at the best of four windows (10, 20, 30,
   50 ns); above 94 % at 100 ns with `f0 = 0.99`; and lower when `eta`
@@ -1026,6 +1057,19 @@ since 0.5.0)
   `xi_pol_overlap`; a target fidelity must be a real number.
 
 ## Corrections in earlier versions
+
+**0.6.0 changed what counts as a photon into the cavity mode.** The
+coupled line decays `F_C` times faster with the cavity than without
+it (Lee et al., arXiv:2511.05740, Eq. 2). Only the added part,
+`F_C - 1`, goes into the cavity mode. Up to 0.5.0, `beta`, `g` and the
+cooperativity used `F_C`, so they counted the line's normal emission
+as cavity photons. With no overlap at all, `beta` was 0.342 instead
+of 0. For the design point of example 2, `beta` drops from 0.909 to
+0.862, `eta` from 0.648 to 0.614, `g` from 7.52 to 7.32 GHz and the
+cooperativity from 6.60 to 6.26. The fidelity of the test suite's
+design point drops from 0.9813 to 0.9802 (best of four windows). The
+Purcell factor, lifetime, linewidth and cyclicity do not change.
+`beta_form="transition"` gives the old numbers.
 
 **0.5.0 fixed two problems in the inverse readout tools.** Both only
 changed answers in edge cases; every other result is unchanged.
@@ -1159,9 +1203,9 @@ design (FEM/EME/GME electromagnetic simulations) and reproduces the specific stu
 > on thin-film lithium niobate" (submitted to Optics Express, 2026);
 > pipeline: https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface
 
-Formalism: Rosenthal et al., PRX 13, 031022 (2023) and
-arXiv:2403.13110; transition-resolved cavity conventions: Lee et al.,
-arXiv:2511.05740; heralding: Barrett and Kok, PRA 71, 060310(R)
+Formalism: Rosenthal et al., PRX 13, 031022 (2023) and PRX 14,
+041008 (2024) (arXiv:2403.13110); decay-rate budget of the coupled
+transition: Lee et al., arXiv:2511.05740; heralding: Barrett and Kok, PRA 71, 060310(R)
 (2005); optimal design: F. Pukelsheim, Optimal Design of Experiments,
 SIAM (2006).
 
