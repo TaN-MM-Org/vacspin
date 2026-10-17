@@ -165,3 +165,26 @@ def test_only_the_cavity_added_emission_goes_into_the_mode():
         assert getattr(new, name) == getattr(old, name)
     with pytest.raises(ValueError, match="beta_form"):
         _ci(beta_form="total")
+
+
+def test_cavity_with_f_max_below_one_is_refused():
+    """Since 0.7.0. A large-volume resonator (Q_L = 1000, V = 100
+    (lam/n)^3) has F_max = (3 / 4 pi^2) Q / V = 0.760 < 1, so
+    F_C = 1 + (F_max - 1) xi = 0.920 and the cavity-mode share
+    a (F_C - 1) / zeta is negative. 0.6.0 returned beta = eta = -0.0281
+    and g_hz = NaN (and require_valid() then blamed weak coupling); the
+    interface now refuses and says why. With no overlap F_C = 1 and
+    nothing changes (beta = 0); the "transition" form keeps its 0.5.0
+    numbers (beta = a F_C / zeta); and F_max = 1 up to round-off
+    (Q / V = 4 pi^2 / 3) gives beta = 0, not a negative value."""
+    assert abs(purcell_max(1000.0, 100.0) - 0.7599) < 1e-4
+    with pytest.raises(ValueError, match="F_max = 0.7599.*below 1"):
+        _ci(q=1000.0, v_rel=100.0, xi_pos=0.5)
+    none = _ci(q=1000.0, v_rel=100.0, xi_pos=0.0)
+    assert none.f_c == 1.0 and none.beta == 0.0 and none.g_hz == 0.0
+    old = _ci(q=1000.0, v_rel=100.0, beta_form="transition")
+    a = BUD.radiative_fraction
+    assert abs(old.beta - a * old.f_c / old.zeta) < 1e-15
+    assert 0.0 < old.beta < 1.0 and np.isfinite(old.g_hz)
+    edge = _ci(q=4.0 * np.pi ** 2 / 3.0, v_rel=1.0)
+    assert 0.0 <= edge.beta < 1e-12 and np.isfinite(edge.g_hz)

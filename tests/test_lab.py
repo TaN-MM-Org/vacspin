@@ -365,3 +365,55 @@ def test_propagation_boundary_and_error_handling():
 
     with pytest.raises(ValueError, match="picky"):
         propagate_uncertainty(fit2, picky)
+
+
+def test_batched_observables_equal_the_pointwise_path():
+    """Since 0.7.0 the fits evaluate all observations at once (one
+    rotation, one stacked eigvalsh per manifold). The 0.6.0
+    point-by-point path is kept as the reference: for 150 random
+    designs of all three centers, kinds, fields and strain scales the
+    two agree within 1e-12 GHz, and a fit, the planner and the error
+    propagation give the same numbers either way (to 1e-12
+    relative)."""
+    import vacspin.lab as lab
+    from vacspin import gev_bhaskar2017, propagate_uncertainty, siv_hepp2014
+    rng = np.random.default_rng(12)
+    vary = ("lam_g", "ups_g", "f_e")
+    for params in (P, siv_hepp2014(), gev_bhaskar2017()):
+        x = np.array([getattr(params, k) for k in vary])
+        for _ in range(50):
+            n = int(rng.integers(1, 12))
+            kinds = list(rng.choice(["qubit", "orbital_g", "orbital_e"],
+                                    n))
+            b = rng.normal(0.0, 0.5, (n, 3))
+            s = rng.uniform(0.0, 2.0)
+            new = lab._model_vector(params, vary, x, kinds, b, s)
+            old = lab._model_vector_pointwise(params, vary, x, kinds, b, s)
+            assert np.max(np.abs(new - old)) <= 1e-12
+
+    kinds, fields = _design()
+    values = np.array([_observe(P, k, bb, 1.0)
+                       for k, bb in zip(kinds, fields)]) + 0.03
+    start = dataclasses.replace(P, lam_g=P.lam_g * 1.05)
+
+    def run():
+        fit = fit_spin_parameters(kinds, fields, values, start,
+                                  vary=("lam_g", "ups_g"),
+                                  sigmas_ghz=0.05)
+        info = parameter_information(kinds, fields, P,
+                                     vary=("lam_g", "ups_g"),
+                                     sigmas_ghz=0.05)
+        q = propagate_uncertainty(
+            fit, lambda p: qubit_frequency(p, fields[3]))
+        return ([fit.values[k] for k in ("lam_g", "ups_g")]
+                + [fit.sigma[k] for k in ("lam_g", "ups_g")]
+                + [fit.chi2, info["sigma"]["lam_g"], q["sigma"]])
+
+    new = np.array(run())
+    batched = lab._model_vector
+    lab._model_vector = lab._model_vector_pointwise
+    try:
+        old = np.array(run())
+    finally:
+        lab._model_vector = batched
+    assert np.allclose(new, old, rtol=1e-12, atol=0.0)

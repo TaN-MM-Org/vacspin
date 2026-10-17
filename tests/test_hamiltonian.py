@@ -127,3 +127,29 @@ def test_h_manifold_matches_term_by_term_construction():
         h = h_manifold(lam, ux, uy, f, d, b)
         assert np.max(np.abs(h - _h_reference(lam, ux, uy, f, d, b))) \
             < 1e-12
+
+
+def test_non_finite_strain_scale_refused():
+    """Since 0.7.0 a NaN or infinite strain_scale is refused with a
+    ValueError that names it, in `solve` and everything built on it
+    and in the lab fits (0.6.0 failed inside LAPACK with "Eigenvalues
+    did not converge")."""
+    from vacspin import (cyclicity, fit_spin_parameters, rabi_rate,
+                         snv_rosenthal2023, transition_table)
+    from vacspin.lab import _observe
+    p = snv_rosenthal2023()
+    b = [0.0, 0.0, 0.1]
+    for bad in (np.nan, np.inf, -np.inf, "x"):
+        for call in (lambda: solve(p, b, strain_scale=bad),
+                     lambda: qubit_frequency(p, b, strain_scale=bad),
+                     lambda: cyclicity(p, b, strain_scale=bad),
+                     lambda: transition_table(p, b, strain_scale=bad),
+                     lambda: rabi_rate(p, b, [1e-4, 0, 0],
+                                       strain_scale=bad),
+                     lambda: _observe(p, "qubit", b, bad),
+                     lambda: fit_spin_parameters(
+                         ["qubit", "orbital_g", "qubit"],
+                         [b, b, [0.1, 0.0, 0.0]], [3.0, 900.0, 3.0], p,
+                         sigmas_ghz=0.1, strain_scale=bad)):
+            with pytest.raises(ValueError, match="strain_scale"):
+                call()

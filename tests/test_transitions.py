@@ -67,3 +67,15 @@ def test_siv_unstrained_cyclicity_diverges_along_axis():
                    np.sin(p.theta_rad) * np.sin(p.phi_rad),
                    np.cos(p.theta_rad)])
     assert cyclicity(p, 0.1 * mu) > 1e12
+
+
+def test_rabi_rate_refuses_non_finite_drive():
+    """Since 0.7.0 a drive field with a NaN or infinite component is
+    refused (0.6.0 returned NaN)."""
+    p = snv_rosenthal2023()
+    b0 = field_on_circle(147.0, 0.125)
+    for bad in ([np.nan, 0.0, 0.0], [0.0, np.inf, 0.0]):
+        for full in (False, True):
+            with pytest.raises(ValueError, match="b_drive_lab"):
+                rabi_rate(p, b0, bad, full_zeeman=full)
+    assert rabi_rate(p, b0, [6e-4, 0.0, 0.0]) > 0.0
