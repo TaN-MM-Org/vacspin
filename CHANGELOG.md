@@ -4,6 +4,112 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.7.0 (2026-10-17)
+
+The readout window with the highest fidelity, error bars on anything
+predicted from a readout calibration, a refusal for cavities with a
+Purcell factor below 1, faster spin fits, and two worked tutorials.
+
+### Added
+
+- `optimal_window(eta, lam, gamma, s, leak, noise_rate, f0, tau_min,
+  tau_max)` (`vacspin.readout`, exported at top level): the readout
+  window with the highest single-shot fidelity, for readouts whose
+  fidelity rises and then falls (background or leak). An 80-point
+  log scan plus a golden-section search around the best point; returns
+  the `fidelity` result at that window plus `tau`. It refuses when
+  there is no peak inside the range (the fidelity at `tau_max` within
+  1e-9 of the best, as without background and leak; or the best at
+  `tau_min`), `eta = 0`, and bad `tau_min`/`tau_max`. Tests: with a
+  threshold of one photon and background rate N, setting the slope of
+  F(tau) = 1/2 + e^(-N tau) (1 - P0(tau)) / 2 to zero gives the closed
+  form tau* = ln(1 + a/N) / a, a = R/(Lambda + 1) + eta R (derived in
+  the test); in three cases the window matches it to 1e-5 relative and
+  the fidelity to 1e-10. With a leaking dark spin and at the cavity
+  design point, no window of a 400-point scan or of a fine scan within
+  5 % beats it (beyond 1e-12).
+- `propagate_uncertainty` now also takes a `ReadoutFit` from
+  `fit_readout_histograms`; the function then receives a dict with
+  `eta`, `lam` and `noise_rate`. Same first-order propagation
+  J cov J^T, one-sided only where a step leaves the model's range.
+  Tests: exact for linear quantities (own error bar to 1e-9 relative;
+  full covariance and A C A^T to 1e-8 relative; one-sided at eta = 1);
+  the Poisson-limit closed form 2 sqrt(m/N) for a predicted mean count
+  (1e-6 relative); the fidelity at an unmeasured window within 5 % of
+  the spread over 2000 parameter sets drawn from the fit's
+  uncertainty; over 150 simulated experiments of the counting process
+  the pulls have a spread within 20 % of 1 and a mean within 0.25.
+
+### Fixed
+
+- `CavityInterface` with an ideal Purcell factor below 1 and any
+  overlap returned a negative photon share. Cause: with
+  F_max = (3/4 pi^2) Q/V < 1, F_C = 1 + (F_max - 1) xi < 1, so
+  `beta = a (F_C - 1) / zeta` < 0. Example: Q_L = 1000, V = 100
+  (lam/n)^3 (F_max = 0.760), xi_pol = 2/3, xi_pos = 0.5, eta_wg = 1:
+  before,
+  `beta = eta = -0.0281` and `g_hz = cooperativity = NaN` (with a
+  RuntimeWarning), and `require_valid()` blamed "weak_coupling";
+  after, a `ValueError` naming F_max and the condition
+  Q/V >= 4 pi^2/3. With no overlap (F_C = 1, beta = 0) and with
+  `beta_form="transition"` nothing changes; a guard keeps F_max = 1 up
+  to round-off at beta in [0, 1e-12] (tested). Every result with
+  F_max >= 1 is unchanged. Test:
+  `test_cavity_with_f_max_below_one_is_refused`.
+
+### Changed
+
+- A NaN or infinite `strain_scale` is refused with a `ValueError` that
+  names it, in `solve`, `qubit_frequency`, `cyclicity`,
+  `transition_table`, `rabi_rate` and the `vacspin.lab` fits (before:
+  NumPy's `LinAlgError` "Eigenvalues did not converge"). Test:
+  `test_non_finite_strain_scale_refused`.
+- `rabi_rate` refuses a drive field with a NaN or infinite component
+  (before: it returned NaN). Test:
+  `test_rabi_rate_refuses_non_finite_drive`.
+- Type hints on `solve`, `rabi_rate`, `propagate_uncertainty` and the
+  new function.
+- Documentation: README sections for the new tools, a Tutorials
+  section, the refusals, the checks, a 0.7.0 correction note and a
+  limit for `optimal_window`; the examples header now says the outputs
+  were printed with 0.7.0 (it said 0.5.0, although example 2 already
+  showed the 0.6.0 numbers). README examples 1 to 7 print the same
+  numbers as in 0.6.0. Test count 122 (103 before).
+
+### Performance
+
+- The `vacspin.lab` fits evaluate all observations at once: one
+  rotation of every field and one stacked `eigvalsh` per manifold,
+  instead of a Python loop over points. Each Hamiltonian is built with
+  the same arithmetic as `h_manifold`; on the maintainer's machine the
+  results are bit-identical to 0.6.0 with NumPy 1.22.0 and 2.5.3, and
+  the test holds them to the kept point-by-point path within 1e-12 GHz
+  (150 random designs, three centers) and the fit, planner and
+  propagation results to 1e-12 relative
+  (`test_batched_observables_equal_the_pointwise_path`). Measured CPU
+  time, median of 3 runs of 15 calls each, same machine, Python 3.13,
+  NumPy 2.5.3: `fit_spin_parameters` (6 points, 2 parameters)
+  68.2 ms -> 25.6 ms (2.7x); `parameter_information` (20 points,
+  4 parameters) 7.5 ms -> 1.75 ms (4.3x); `design_fields` (8 of 20)
+  17.2 ms -> 4.9 ms (3.5x); the 400-fit Monte Carlo test 15.6 s ->
+  6.3 s (2.5x). The whole suite (wall time, median of 3 on a shared
+  machine) went from 32 s for 103 tests to 18 s for 122.
+
+### Tutorials
+
+- `examples/tutorial_readout_window.py`: from simulated bright and
+  dark count histograms (fixed seed) to the calibrated efficiency,
+  cyclicity and background, the best window and its fidelity, each
+  with an error bar, checked against the closed-form window.
+- `examples/tutorial_spin_to_readout.py`: from simulated qubit and
+  orbital frequencies of a strained SnV- center to the fitted
+  spin-orbit and strain constants, the cyclicity and qubit frequency
+  at a readout field, the Q_L = 500 cavity budget, the best window and
+  the fidelity with the calibration's error bar carried through.
+- Each runs in under a second; their output is in the README and in
+  each script's docstring, and `tests/test_tutorials.py` runs both
+  and checks the printed numbers.
+
 ## 0.6.0 (2026-10-10)
 
 The photon share of the cavity mode now counts only the emission the

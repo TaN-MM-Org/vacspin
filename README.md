@@ -30,6 +30,8 @@ optics around it, the package answers questions such as:
 - From your own single-shot photon-count histograms, what are the
   detection efficiency, cyclicity and background of your setup, with
   error bars, and does the model describe the data at all?
+- Which readout window gives the highest fidelity, and how well is
+  that fidelity known from your calibration?
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -45,6 +47,7 @@ number that looks fine but is not.
 - [A short guide to the words used here](#a-short-guide-to-the-words-used-here)
 - [Install, units and conventions](#install-units-and-conventions)
 - [Examples](#examples) (each with the output it prints)
+- [Tutorials](#tutorials) (two end-to-end scripts in `examples/`)
 - [Cited parameter sets](#cited-parameter-sets)
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
@@ -155,7 +158,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.5.0. The cavity, detector, attempt-rate and
+printed with vacspin 0.7.0 (the same as with 0.6.0). The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -600,6 +603,71 @@ What the fit can and cannot tell:
   The test suite shows that 20 % failed preparations among 5000 shots
   give a p-value below 10^-6.
 
+## Tutorials
+
+Two scripts in the `examples/` folder of the repository go from data to
+a final result with error bars. Each makes its own "measured" data with
+a fixed random seed, so you can run it as is and then swap in your own
+numbers. Each runs in about a second. The test suite runs both and
+checks the numbers below.
+
+### The best readout window, from your count histograms
+
+`examples/tutorial_readout_window.py` fits the detection efficiency,
+cyclicity and background to 5000 bright and 5000 dark shots
+(`fit_readout_histograms`). It then finds the window with the highest
+fidelity (`optimal_window`, new in 0.7.0) and gives error bars on that
+window and on its fidelity (`propagate_uncertainty` with the readout
+fit, new in 0.7.0). It printed:
+
+```
+calibration from 5000 bright and 5000 dark shots:
+  eta        = 0.1968 +/- 0.0033 %   (simulated 0.2000 %)
+  lam        = 2398 +/- 112   (simulated 2244)
+  noise_rate = 3752 +/- 193 counts/s   (simulated 4000)
+  goodness of fit: chi2 = 8.3 for 10 degrees of freedom, p = 0.60
+best window: 17.34 +/- 0.35 us (closed form for threshold 1: 17.34 us)
+fidelity there: 0.8807 +/- 0.0025 (threshold 1 photon)
+with the simulated values: 16.76 us, fidelity 0.8763
+```
+
+The fitted values lie within two error bars of the simulated ones, and
+so do the window and the fidelity. With a threshold of one photon the
+best window has a closed form, `ln(1 + a / N) / a` with
+`a = R / (lam + 1) + eta R` and `N` the background rate; the search
+lands on it.
+
+### From your spin frequencies to a cavity readout
+
+`examples/tutorial_spin_to_readout.py` fits the spin-orbit and strain
+constants of a center whose strain is 10 % above the cited value, from
+its qubit frequency and ground splitting at eight field angles. It then
+predicts the cyclicity and qubit frequency at a readout field 9 degrees
+from the center's axis, builds the Q_L = 500 cavity budget of example 2
+on them, finds the best window and carries the fit's error bars through
+the whole chain to the fidelity. It printed:
+
+```
+fitted ground state of this center:
+  lam_g = 831.5 +/- 5.6 GHz   (simulated 830.1)
+  ups_g = 194.0 +/- 6.0 GHz   (simulated 195.4)
+  chi2 = 3.87 for 6 degrees of freedom, p = 0.69
+at the readout field: cyclicity 1827 +/- 143, qubit frequency 5.910 +/- 0.005 GHz
+cavity: F_C = 19.29, eta = 0.614, cavity-boosted cyclicity 1827
+best window 24.8 ns (threshold 2 photons): fidelity 0.99075 +/- 0.00008
+with the simulated center: fidelity 0.99073 at the same window
+```
+
+Here the calibration barely matters for the fidelity (an error bar of
+1e-4). In the 25 ns window the bright spin emits only about 13 photons
+(8 of them detected), so a cyclicity of 1800 +/- 140 hardly changes the
+chance that it flips during the window. The cavity does not raise the cyclicity, because
+its linewidth (about 1 THz) is much larger than the qubit frequency,
+so it speeds up the spin-flipping line as much as the bright one. The
+dark spin's leak is the ratio of the off-resonant to the resonant
+scattering rate, from Eq. A8 of Rosenthal et al., PRX 14, 041008
+(2024), at a detuning of one qubit frequency.
+
 ## Cited parameter sets
 
 No physical number is made up, and none is accepted without a source:
@@ -730,6 +798,13 @@ Appendix A)
   1e-9, on the error from tracking a finite number of counts).
 - `required_efficiency`, `required_window` -- the smallest efficiency
   or shortest window that reaches a target fidelity.
+- `optimal_window` (new in 0.7.0) -- the window with the highest
+  fidelity, when the fidelity rises and then falls again (background or
+  leak). Returns the `fidelity` result at that window plus `tau`. It
+  scans 80 windows from `tau_min` to `tau_max` (1 ns to 10 ms by
+  default) and refines the best one; each window costs one `fidelity`
+  call, so a long `tau_max` with a bright cavity readout (thousands of
+  counts) takes a few seconds.
 - `poisson_pmf`, `geometric_pmf` -- the two limiting count
   distributions (no spin flips; flips always end the record).
 
@@ -753,7 +828,10 @@ Appendix A)
   (measured minus fitted values).
 - `propagate_uncertainty` -- after fitting: the value and error bar
   (and covariance) of any quantity computed from the fitted
-  parameters, by first-order error propagation.
+  parameters, by first-order error propagation. Since 0.7.0 it also
+  takes a `ReadoutFit`; your function then receives a dict with the
+  keys `eta`, `lam` and `noise_rate`, for example to get the error bar
+  of the fidelity at a window you have not measured.
 - `save_observations_csv`, `load_observations_csv` -- a plain CSV
   format for observation records (columns `kind, bx_t, by_t, bz_t,
   value_ghz` and optionally `sigma_ghz`). Since 0.5.0 the loader also
@@ -776,15 +854,18 @@ Appendix A)
   number that is not finite (NaN or infinity), a spin-orbit constant
   that is not positive, a negative strain, a lifetime or wavelength
   that is not positive and finite, or an efficiency outside (0, 1];
-- the magnetic field is not finite, `strain_scale` is negative, or the
-  sideways field given to `qubit_frequency_perpendicular` is negative
-  or not finite;
+- the magnetic field is not finite, `strain_scale` is negative or (since
+  0.7.0) not finite, a Rabi drive field is not finite (since 0.7.0), or
+  the sideways field given to `qubit_frequency_perpendicular` is
+  negative or not finite;
 - a manifold or field-plane name is unknown;
 - a cavity's `Q` or `V` is not positive and finite, an efficiency or
   overlap is outside [0, 1], the bare cyclicity is not finite and
   positive, or the qubit frequency or `delta_partner_hz` is not
   positive and finite, or `beta_form` is not `"purcell"` or
-  `"transition"`;
+  `"transition"`; since 0.7.0 also a cavity whose ideal Purcell factor
+  `F_max` is below 1 (`Q / V` below `4 pi^2 / 3`, about 13.2) when the
+  emitter overlaps the mode, with the default `beta_form`;
 - `require_valid()` finds the interface outside the bad-cavity,
   weak-coupling or spin-selective regime (and, when
   `delta_partner_hz` is given, the partner-selectivity condition); it
@@ -822,11 +903,19 @@ Appendix A)
   `eta = 1`; or a fit that does not converge (`RuntimeError`);
 - a target fidelity that is not a real number (since 0.5.0, for
   example the string `"0.9"`), or a polarization angle in
-  `xi_pol_overlap` that is not finite.
+  `xi_pol_overlap` that is not finite;
+- in `optimal_window` (since 0.7.0): no peak inside the range (the
+  fidelity at `tau_max` is within 1e-9 of the best found, as without
+  background and leak, where it never falls; or the best is at
+  `tau_min`), `eta = 0`, or `tau_min` and `tau_max` that are not
+  finite with `0 < tau_min < tau_max`;
+- in `propagate_uncertainty` with a `ReadoutFit`: a function that
+  returns a non-finite value or slope, or a covariance that does not
+  match the fitted parameters.
 
 ## How the results are checked
 
-103 automated tests run on every push and pull request, on Python 3.9,
+122 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -906,6 +995,10 @@ checks, with the tolerances the tests actually use:
   formula (to 1 part in 10^9), and grows by less than 5 % for a very
   broad cavity (Q = 10).
 - `require_valid()` passes at Q = 500 and refuses at Q = 2 x 10^7.
+- Since 0.7.0: a cavity with `F_max = 0.760` (Q = 1000, V = 100) is
+  refused, while with no overlap it still gives `beta = 0`, the
+  `"transition"` form keeps its formula (to 1e-15), and
+  `F_max = 1` up to round-off gives `beta` between 0 and 1e-12.
 
 **Readout statistics**
 
@@ -959,6 +1052,15 @@ checks, with the tolerances the tests actually use:
   photon). For a target between the best grid value and the true
   peak, the returned window equals the closed-form crossing (to 1
   part in 10^5); 0.4.0 refused the target.
+- `optimal_window` (since 0.7.0): with a threshold of one photon and
+  background rate `N` the fidelity peaks at the closed form
+  `tau* = ln(1 + a / N) / a`, `a = R / (Lambda + 1) + eta R` (from
+  setting the slope of `1/2 + e^(-N tau) (1 - P0(tau)) / 2` to zero).
+  In three cases the returned window equals it (to 1 part in 10^5)
+  and its fidelity equals the closed form (to 1e-10). With a leaking
+  dark spin, and at the cavity design point, no window of a 400-point
+  scan or of a fine scan within 5 % of the result does better (beyond
+  1e-12). Without background or leak it refuses, as it should.
 - `required_efficiency` below its search start of `eta = 1e-6`:
   without background the fidelity is `1 - P0(eta)/2` in closed form,
   and the returned efficiency equals the closed-form one (to 1 part in
@@ -998,6 +1100,11 @@ stated inputs, with the qubit frequency computed by the package)
   of 30 random subsets of the same size. (The rank-one determinant
   identity behind the greedy rule is checked on random matrices.)
 - A CSV round trip returns identical values.
+- The batched evaluation of all observations at once (since 0.7.0,
+  for speed) equals the 0.6.0 point-by-point path for 150 random
+  designs of all three centers (to 1e-12 GHz), and a fit, the planner
+  and the error propagation give the same numbers either way (to 1
+  part in 10^12).
 - The faster eigenvalue-only path used by the fits equals the full
   solver for all three observables, 20 random fields and strain
   scales (to 1e-9 GHz).
@@ -1048,6 +1155,19 @@ since 0.5.0)
   `exp(-chi2/2)` (to 1e-14).
 - A CSV file with a byte-order mark and trailing empty lines loads to
   exactly the values written.
+- Error bars on predictions from a readout fit (since 0.7.0): a fitted
+  parameter returns its own error bar (to 1e-9 relative), all three
+  return the fit's covariance and a linear combination `A x` returns
+  `A C A^T` (to 1e-8 relative), and at `eta = 1` the one-sided slope is
+  still exact. In the Poisson limit the error bar of a predicted mean
+  count equals the closed form `2 sqrt(m / N)` (to 1 part in 10^6).
+  For the fidelity at an unmeasured window it agrees within 5 % with
+  the spread over 2000 parameter sets drawn from the fit's
+  uncertainty. Over 150 simulated experiments of the counting process,
+  (prediction minus true fidelity) / error bar has a spread within
+  20 % of 1 and a mean within 0.25 of 0.
+- The two tutorials run, print the numbers documented here, and land
+  within 3 error bars of the simulated truth.
 
 **Inputs**
 
@@ -1057,6 +1177,21 @@ since 0.5.0)
   `xi_pol_overlap`; a target fidelity must be a real number.
 
 ## Corrections in earlier versions
+
+**0.7.0 refuses a cavity whose Purcell factor is below 1.** For a
+large-volume resonator, for example Q_L = 1000 and V = 100
+`(lam/n)^3`, the ideal Purcell factor `F_max = (3 / 4 pi^2) Q / V` is
+0.760. Then `F_C = 1 + (F_max - 1) xi` is below 1, and the share of
+photons in the cavity mode, `a (F_C - 1) / zeta`, is negative. 0.6.0
+returned `beta = eta = -0.0281` and `g_hz = NaN` there, and
+`require_valid()` then blamed weak coupling. `CavityInterface` now
+refuses with a message that names `F_max`. With no overlap
+(`xi_pos = 0`) nothing changes, and `beta_form="transition"` is
+unchanged. Every result with `F_max >= 1` is unchanged.
+
+Also in 0.7.0: a NaN or infinite `strain_scale` gave NumPy's
+"Eigenvalues did not converge", and a NaN Rabi drive gave a NaN rate.
+Both are now refused with a message that names the input.
 
 **0.6.0 changed what counts as a photon into the cavity mode.** The
 coupled line decays `F_C` times faster with the cavity than without
@@ -1189,6 +1324,11 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   an error bar is large compared with the scale on which the predicted
   quantity curves (or reaches a boundary such as zero strain), sample
   the fit's uncertainty instead.
+- **`optimal_window`** finds the highest peak it sees on an 80-point
+  scan and refines it. The fidelity is the larger of smooth curves (one
+  per threshold), so it can have more than one local peak; a narrow
+  peak between two scan points could be missed. Its error bar from
+  `propagate_uncertainty` is first-order, like every other one here.
 
 ## Where it comes from
 
