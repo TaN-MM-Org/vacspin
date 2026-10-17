@@ -126,6 +126,13 @@ class CavityInterface:
 
     Everything is computed in __init__; `validity` holds the regime
     checks and `require_valid()` refuses when any fails.
+
+    Since 0.7.0 the default form refuses a cavity whose ideal Purcell
+    factor F_max is below 1 when the emitter overlaps the mode at all
+    (Q_L / V below 4 pi^2 / 3, about 13.2, for example a large-volume
+    resonator with Q_L = 1000 and V = 100): then F_C < 1, and the
+    cavity-mode share a (F_C - 1) / zeta would be negative. 0.6.0
+    returned a negative `beta` and `eta` and a NaN `g_hz` there.
     """
 
     def __init__(self, q_loaded, v_rel, eta_wg, budget: EmissionBudget,
@@ -166,6 +173,18 @@ class CavityInterface:
         a = budget.radiative_fraction
         self.f_max = purcell_max(q_loaded, v_rel)
         self.f_c = 1.0 + (self.f_max - 1.0) * xi_pol * xi_pos
+        if beta_form == "purcell" and self.f_c < 1.0 - 1e-12:
+            # F_max < 1 with some overlap: the cavity-added emission
+            # F_C - 1 would be negative, and with it beta, eta, g and C
+            # (0.6.0 returned a negative beta and eta and a NaN g)
+            raise ValueError(
+                f"the ideal Purcell factor F_max = {self.f_max:.4g} "
+                f"(Q_L = {self.q:.4g}, V = {self.v:.4g} (lam/n)^3) is "
+                "below 1, so F_C - 1 = "
+                f"{self.f_c - 1.0:.3g} < 0 and the photon share of the "
+                "cavity mode would be negative. This budget needs "
+                "F_max >= 1 (Q_L / V >= 4 pi^2 / 3, about 13.2); raise "
+                "Q_L or lower V")
         lc2 = lorentzian_suppression(omega_q_hz, self.f_cav_hz, self.q)
         self.f_c2 = 1.0 + (self.f_max - 1.0) * xi_pol * xi_pos * lc2
         self.zeta = 1.0 + a * (self.f_c - 1.0)
@@ -174,7 +193,10 @@ class CavityInterface:
         self.tau_cav_s = 1.0 / self.gamma_cav
         self.lambda_cav = float(lambda0) * self.zeta / zeta_flip
         # the cavity-mode share of transition C's enhanced emission
-        f_mode = self.f_c - 1.0 if beta_form == "purcell" else self.f_c
+        # (max: F_max equal to 1 up to round-off must not give a share
+        # of -1e-16)
+        f_mode = (max(self.f_c - 1.0, 0.0) if beta_form == "purcell"
+                  else self.f_c)
         self.beta = a * f_mode / self.zeta
         self.eta_wg = float(eta_wg)
         self.eta = (self.beta * self.eta_wg * float(t_link)

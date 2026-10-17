@@ -59,7 +59,7 @@ import numpy as np
 
 __all__ = ["polarization_rate", "readout_counts", "fidelity_threshold1",
            "geometric_pmf", "poisson_pmf", "fidelity",
-           "required_efficiency", "required_window"]
+           "required_efficiency", "required_window", "optimal_window"]
 
 
 def _check_common(eta, lam, gamma, tau, s):
@@ -600,3 +600,81 @@ def required_window(target_fidelity: float, eta: float, lam: float,
     else:
         lo, hi = taus[i - 1], taus[i]
     return float(_bisect_increasing(f, lo, hi, target_fidelity))
+
+
+def optimal_window(eta: float, lam: float, gamma: float, s: float = 1.0,
+                   leak: float = 0.0, noise_rate: float = 0.0,
+                   f0: float = 1.0, tau_min: float = 1e-9,
+                   tau_max: float = 1e-2) -> dict:
+    """The readout window with the highest single-shot fidelity (new in
+    0.7.0).
+
+    With background counts or a leaking dark spin the fidelity rises,
+    peaks and falls as the window grows: a longer window collects more
+    bright photons but also more dark counts. This function finds the
+    peak: a scan of 80 windows spaced evenly in log(tau) from `tau_min`
+    to `tau_max`, then a golden-section search in log(tau) between the
+    neighbors of the best one (as `required_window` does before it
+    refuses). The arguments are those of `fidelity`.
+
+    Returns the `fidelity` dict at the best window (fidelity,
+    threshold, mean counts, truncation_bound) plus `tau`, the window
+    in seconds.
+
+    Refuses (ValueError) when there is no peak inside the range: when
+    the fidelity at `tau_max` is within 1e-9 of the best value found
+    (it is still rising, or has leveled off, as it does without
+    background and leak), or when the best value is at `tau_min`. For
+    a fidelity that keeps rising, ask for a target instead
+    (`required_window`). The fidelity is the maximum over integer
+    thresholds, so it can have more than one local peak; the scan
+    picks the highest one it sees before refining it.
+
+    Check (tests): with a threshold of one photon and background rate
+    N, F(tau) = 1/2 + e^{-N tau} (1 - P0(tau)) / 2 with P0 the
+    probability of no signal photon, and dF/dtau = 0 gives the closed
+    form tau* = ln(1 + a / N) / a, a = R / (Lambda + 1) + eta R.
+    """
+    _check_common(eta, lam, gamma, 1.0, s)
+    _check_background(leak, noise_rate)
+    if not (0.0 < f0 <= 1.0):
+        raise ValueError("f0 must be in (0, 1]")
+    try:
+        lo, hi = float(tau_min), float(tau_max)
+    except (TypeError, ValueError):
+        lo = hi = float("nan")
+    if not (np.isfinite(lo) and np.isfinite(hi) and 0.0 < lo < hi):
+        raise ValueError("tau_min and tau_max must be finite with "
+                         "0 < tau_min < tau_max (seconds)")
+    if eta == 0.0:
+        raise ValueError("eta = 0: no signal photon is ever detected, "
+                         "so every window gives fidelity 1/2")
+
+    def f(t):
+        return fidelity(eta, lam, gamma, t, s, leak, noise_rate,
+                        f0)["fidelity"]
+
+    n_scan = 80
+    taus = np.geomspace(lo, hi, n_scan)
+    vals = np.array([f(t) for t in taus])
+    j = int(np.argmax(vals))
+    left = taus[max(j - 1, 0)]
+    right = taus[min(j + 1, n_scan - 1)]
+    t_pk, f_pk = _peak_near(f, left, right)
+    if f_pk < vals[j]:                       # keep the scan's best
+        t_pk, f_pk = float(taus[j]), float(vals[j])
+    if vals[-1] >= f_pk - 1e-9:
+        raise ValueError(
+            f"no peak below tau_max = {hi:.4g} s: the fidelity there "
+            f"({vals[-1]:.6f}) is within 1e-9 of the best found "
+            f"({f_pk:.6f}), so it is still rising or has leveled off "
+            "(without background and leak it never falls). Give a "
+            "larger tau_max, or ask required_window for a target")
+    if t_pk <= lo * (1.0 + 1e-9):
+        raise ValueError(
+            f"the best window is at tau_min = {lo:.4g} s (fidelity "
+            f"{f_pk:.6f}); the peak lies below it. Give a smaller "
+            "tau_min")
+    out = fidelity(eta, lam, gamma, t_pk, s, leak, noise_rate, f0)
+    out["tau"] = float(t_pk)
+    return out

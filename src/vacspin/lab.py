@@ -60,7 +60,9 @@ from typing import Optional
 
 import numpy as np
 
-from .hamiltonian import h_manifold, lab_to_spin
+from .hamiltonian import (GAMMA_GHZ_PER_T, _K_JT_X, _K_JT_Y, _K_L,
+                          _K_SO, _K_SX, _K_SY, _K_SZ,
+                          _check_strain_scale, h_manifold, lab_to_spin)
 from .params import SpinParameters
 from .readout import (_check_background, _check_common,
                       _exp_poisson_integrals, _switch_on_pmf, poisson_pmf)
@@ -114,9 +116,7 @@ def _observe(params, kind, b_lab, strain_scale):
                          f"choose from {_KINDS}")
     if not np.all(np.isfinite(b_lab)):
         raise ValueError("magnetic field must be finite")
-    s = float(strain_scale)
-    if s < 0:
-        raise ValueError("strain_scale must be >= 0")
+    s = _check_strain_scale(strain_scale)
     bs = lab_to_spin(b_lab, params.theta_rad, params.phi_rad)
     if kind == "orbital_e":
         e = np.linalg.eigvalsh(h_manifold(params.lam_e, s * params.ups_e,
@@ -129,6 +129,58 @@ def _observe(params, kind, b_lab, strain_scale):
     if kind == "qubit":
         return float(e[1] - e[0])
     return float(e[2] - e[0])
+
+
+def _stacked_manifold(lam, ups_x, f, delta, bs):
+    """`h_manifold` for many spin-frame fields at once: an (n, 4, 4)
+    stack. The same linear combination of the same constant matrices,
+    term by term in the same order, so each slice equals
+    `h_manifold(lam, ups_x, 0.0, f, delta, bs[i])` exactly."""
+    bx = bs[:, 0, None, None]
+    by = bs[:, 1, None, None]
+    bz = bs[:, 2, None, None]
+    g2 = 0.5 * GAMMA_GHZ_PER_T
+    return (-0.5 * lam * _K_SO
+            + ups_x * _K_JT_X + 0.0 * _K_JT_Y
+            + g2 * ((1 + 2 * delta) * bz * _K_SZ + bx * _K_SX
+                    + by * _K_SY)
+            + g2 * f * bz * _K_L)
+
+
+def _observe_many(params, kinds, b, strain_scale):
+    """All observables of a checked design at once (GHz), the batched
+    form of `_observe` used by the fits since 0.7.0: one rotation of
+    every field and one stacked `eigvalsh` per manifold instead of a
+    Python loop over points. Each Hamiltonian is built with the same
+    arithmetic as `h_manifold`; the tests hold the result to the
+    point-by-point path within 1e-12 GHz (on the maintainer's machine
+    it is bit-identical with NumPy 1.22 and 2.5)."""
+    s = _check_strain_scale(strain_scale)
+    kinds = list(kinds)
+    b = np.asarray(b, dtype=float).reshape(len(kinds), 3)
+    ct, st = np.cos(params.theta_rad), np.sin(params.theta_rad)
+    cp, sp = np.cos(params.phi_rad), np.sin(params.phi_rad)
+    rot = np.vstack([np.array([ct * cp, ct * sp, -st]),
+                     np.array([-sp, cp, 0.0]),
+                     np.array([st * cp, st * sp, ct])])
+    # matrix times each field vector, as `lab_to_spin` does (a plain
+    # b @ rot.T can round differently in the last bit)
+    bs = np.matmul(rot[None, :, :], b[:, :, None])[:, :, 0]
+    out = np.empty(len(kinds))
+    exc = np.array([k == "orbital_e" for k in kinds], dtype=bool)
+    gnd = ~exc
+    if np.any(gnd):
+        e = np.linalg.eigvalsh(_stacked_manifold(
+            params.lam_g, s * params.ups_g, params.f_g, params.delta_g,
+            bs[gnd]))
+        is_q = np.array([k == "qubit" for k in kinds], dtype=bool)[gnd]
+        out[gnd] = np.where(is_q, e[:, 1] - e[:, 0], e[:, 2] - e[:, 0])
+    if np.any(exc):
+        e = np.linalg.eigvalsh(_stacked_manifold(
+            params.lam_e, s * params.ups_e, params.f_e, params.delta_e,
+            bs[exc]))
+        out[exc] = e[:, 2] - e[:, 0]
+    return out
 
 
 def _check_inputs(kinds, b_fields_t, values_ghz, sigmas_ghz, vary):
@@ -173,6 +225,13 @@ def _replace(params, vary, x):
 
 
 def _model_vector(params, vary, x, kinds, b, strain_scale):
+    p = _replace(params, vary, x)
+    return _observe_many(p, kinds, b, strain_scale)
+
+
+def _model_vector_pointwise(params, vary, x, kinds, b, strain_scale):
+    """The 0.6.0 form of `_model_vector`, one point at a time; kept as
+    the reference the tests compare the batched path with."""
     p = _replace(params, vary, x)
     return np.array([_observe(p, k, bi, strain_scale)
                      for k, bi in zip(kinds, b)])
@@ -397,10 +456,11 @@ def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
                    residuals_ghz=resid)
 
 
-def propagate_uncertainty(fit, func, rel_step=1e-6):
+def propagate_uncertainty(fit, func, rel_step: float = 1e-6) -> dict:
     """Carry a fit's error bars to any quantity computed from it.
 
-    fit : a `SpinFit` from `fit_spin_parameters`.
+    fit : a `SpinFit` from `fit_spin_parameters` (or, since 0.7.0, a
+        `ReadoutFit`; see below).
     func : a function of a `SpinParameters` returning a number or an
         array of numbers -- for example
         ``lambda p: vacspin.qubit_frequency(p, b)`` for the qubit
@@ -422,9 +482,26 @@ def propagate_uncertainty(fit, func, rel_step=1e-6):
     (a float, or an array for array output), `sigma` its 1-sigma
     uncertainty in the same shape, and `cov` the full covariance
     matrix (1 x 1 for a scalar).
+
+    Since 0.7.0 `fit` can also be a `ReadoutFit` from
+    `fit_readout_histograms`. `func` then receives a dict with the keys
+    "eta", "lam" and "noise_rate" (the fitted values of the varied
+    parameters and the held values of the others), for example
+    ``lambda v: vacspin.fidelity(v["eta"], v["lam"], gamma, tau, s,
+    noise_rate=v["noise_rate"])["fidelity"]`` for the fidelity of a
+    window you have not measured. The step is relative to the value
+    (or to the error bar when that is larger); it is one-sided only
+    where the other side leaves the model's range (eta above 1, or
+    lam or noise_rate at or below 0). The fidelity is the larger of
+    smooth curves (one per threshold), so at a window where two
+    thresholds tie its slope jumps; the propagated error bar is then
+    that of one side.
     """
+    if isinstance(fit, ReadoutFit):
+        return _propagate_readout(fit, func, rel_step)
     if not isinstance(fit, SpinFit):
-        raise TypeError("fit must be a SpinFit from fit_spin_parameters")
+        raise TypeError("fit must be a SpinFit from fit_spin_parameters "
+                        "or a ReadoutFit from fit_readout_histograms")
     if not (np.isfinite(rel_step) and 0.0 < rel_step < 1e-2):
         raise ValueError("rel_step must be in (0, 1e-2)")
     vary = tuple(fit.values)
@@ -1114,3 +1191,66 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
                       p_value=p_val, n_bright_shots=int(hb.sum()),
                       n_dark_shots=0 if hd is None else int(hd.sum()),
                       condition_number=cond, n_iter=it)
+
+
+def _readout_in_range(name, v):
+    """Whether a value is inside the readout model's range."""
+    if not np.isfinite(v):
+        return False
+    if name == "eta":
+        return 0.0 < v <= 1.0
+    if name == "lam":
+        return v > 0.0
+    return v >= 0.0                                  # noise_rate
+
+
+def _propagate_readout(fit, func, rel_step):
+    """`propagate_uncertainty` for a `ReadoutFit` (since 0.7.0): the
+    same first-order propagation J cov J^T, with `func` taking a dict
+    of the three readout parameters."""
+    if not (np.isfinite(rel_step) and 0.0 < rel_step < 1e-2):
+        raise ValueError("rel_step must be in (0, 1e-2)")
+    vary = tuple(fit.vary)
+    base = {k: float(v) for k, v in fit.values.items()}
+    x = np.array([base[k] for k in vary])
+    cov_in = np.asarray(fit.cov, dtype=float)
+    if cov_in.shape != (len(vary), len(vary)):
+        raise ValueError("fit.cov does not match fit.vary")
+
+    def ev(xv):
+        d = dict(base)
+        d.update({k: float(v) for k, v in zip(vary, xv)})
+        return np.atleast_1d(np.asarray(func(d), dtype=float)).ravel()
+
+    value = np.asarray(func(dict(base)), dtype=float)
+    f0 = np.atleast_1d(value).ravel()
+    if not np.all(np.isfinite(f0)):
+        raise ValueError("func returned a non-finite value at the "
+                         "fitted parameters")
+    sig = np.sqrt(np.maximum(np.diag(cov_in), 0.0))
+    jac = np.empty((f0.size, x.size))
+    for j, name in enumerate(vary):
+        h = rel_step * max(abs(x[j]), sig[j])
+        up_ok = _readout_in_range(name, x[j] + h)
+        down_ok = _readout_in_range(name, x[j] - h)
+        xp, xm = x.copy(), x.copy()
+        xp[j] += h
+        xm[j] -= h
+        if up_ok and down_ok:
+            jac[:, j] = (ev(xp) - ev(xm)) / (2.0 * h)
+        elif up_ok:
+            jac[:, j] = (ev(xp) - f0) / h
+        elif down_ok:
+            jac[:, j] = (f0 - ev(xm)) / h
+        else:                                  # pragma: no cover
+            raise ValueError(f"no valid step for {name}")
+    if not np.all(np.isfinite(jac)):
+        raise ValueError("func is not differentiable at the fitted "
+                         "parameters (non-finite derivative)")
+    cov = jac @ cov_in @ jac.T
+    sigma = np.sqrt(np.maximum(np.diag(cov), 0.0))
+    if value.ndim == 0:
+        return {"value": float(value), "sigma": float(sigma[0]),
+                "cov": cov}
+    return {"value": value, "sigma": sigma.reshape(value.shape),
+            "cov": cov}

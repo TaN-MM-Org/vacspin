@@ -91,7 +91,22 @@ def zero_field_splitting(lam, ups_x, ups_y=0.0):
     return float(np.sqrt(lam ** 2 + 4.0 * (ups_x ** 2 + ups_y ** 2)))
 
 
-def solve(params: SpinParameters, b_lab, strain_scale=1.0):
+def _check_strain_scale(strain_scale) -> float:
+    """strain_scale as a float; refuses NaN, infinity and negatives."""
+    try:
+        s = float(strain_scale)
+    except (TypeError, ValueError):
+        s = float("nan")
+    if not np.isfinite(s):
+        raise ValueError(f"strain_scale must be a finite number "
+                         f"(got {strain_scale!r})")
+    if s < 0:
+        raise ValueError("strain_scale must be >= 0")
+    return s
+
+
+def solve(params: SpinParameters, b_lab,
+          strain_scale: float = 1.0) -> tuple:
     """Eigenstructure of both manifolds at a lab-frame field (tesla).
 
     strain_scale multiplies the strain of both manifolds (the strain-
@@ -100,12 +115,15 @@ def solve(params: SpinParameters, b_lab, strain_scale=1.0):
 
     Returns (evals_g, evecs_g, evals_e, evecs_e): energies in GHz
     sorted ascending, eigenvectors as columns.
+
+    Refuses a field or a `strain_scale` that is not finite, and a
+    negative `strain_scale` (since 0.7.0 a NaN or infinite
+    `strain_scale` gives this ValueError instead of NumPy's
+    "Eigenvalues did not converge").
     """
     if not np.all(np.isfinite(b_lab)):
         raise ValueError("magnetic field must be finite")
-    s = float(strain_scale)
-    if s < 0:
-        raise ValueError("strain_scale must be >= 0")
+    s = _check_strain_scale(strain_scale)
     bs = lab_to_spin(b_lab, params.theta_rad, params.phi_rad)
     hg = h_manifold(params.lam_g, s * params.ups_g, 0.0,
                     params.f_g, params.delta_g, bs)

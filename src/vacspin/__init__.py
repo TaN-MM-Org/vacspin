@@ -25,15 +25,16 @@ from .transitions import (cyclicity, field_on_circle, rabi_rate,
 from .cavity import (CavityInterface, lorentzian_suppression,
                      purcell_max, xi_pol_overlap)
 from .readout import (fidelity, fidelity_threshold1, geometric_pmf,
-                      poisson_pmf, polarization_rate, readout_counts,
-                      required_efficiency, required_window)
+                      optimal_window, poisson_pmf, polarization_rate,
+                      readout_counts, required_efficiency,
+                      required_window)
 from .remote import barrett_kok_success, entanglement_rate
 from .lab import (ReadoutFit, SpinFit, design_fields,
                   fit_readout_histograms, fit_spin_parameters,
                   load_observations_csv, parameter_information,
                   propagate_uncertainty, save_observations_csv)
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",
@@ -46,7 +47,7 @@ __all__ = [
     "CavityInterface",
     "polarization_rate", "readout_counts", "fidelity_threshold1",
     "geometric_pmf", "poisson_pmf", "fidelity", "required_efficiency",
-    "required_window",
+    "required_window", "optimal_window",
     "barrett_kok_success", "entanglement_rate",
     "SpinFit", "fit_spin_parameters", "parameter_information",
     "design_fields", "propagate_uncertainty", "save_observations_csv",

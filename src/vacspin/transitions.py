@@ -102,7 +102,8 @@ def cyclicity(params: SpinParameters, b_lab, strain_scale=1.0,
 
 
 def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
-              strain_scale=1.0, full_zeeman: bool = False) -> float:
+              strain_scale: float = 1.0,
+              full_zeeman: bool = False) -> float:
     """Microwave Rabi rate Omega/2pi (GHz) between the two lowest
     ground states for a drive field b_drive_lab (tesla, lab frame):
     |<g1| H_drive |g0>|.
@@ -119,7 +120,14 @@ def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
     percent for typical drive directions, and by more for a drive
     along the symmetry axis (see the README). Which form describes
     your device is a modelling choice; the default keeps the published
-    one."""
+    one.
+
+    Since 0.7.0 a drive field with a NaN or infinite component is
+    refused with a ValueError (a NaN drive returned NaN before)."""
+    drive = np.asarray(b_drive_lab, dtype=float)
+    if not np.all(np.isfinite(drive)):
+        raise ValueError("b_drive_lab must be a finite lab-frame field "
+                         "vector (Bx, By, Bz) in tesla")
     eg, vg, ee, ve = solve(params, b_lab, strain_scale)
     bs = lab_to_spin(b_drive_lab, params.theta_rad, params.phi_rad)
     if full_zeeman:
