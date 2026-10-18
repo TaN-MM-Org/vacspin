@@ -4,6 +4,126 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.8.0 (2026-10-18)
+
+Lifetime histograms and the cavity budget they measure, the readout
+errors of each spin state at the threshold you use, a refusal for
+fields too weak to split the qubit, a faster readout loop, and a third
+worked tutorial.
+
+### Added
+
+- `fit_lifetime_histogram(counts, bin_edges_s, background, t_start,
+  tau_start)` and `LifetimeFit` (`vacspin.lab`, exported at top
+  level): the excited-state lifetime from a time-resolved photon
+  histogram (time-correlated single photon counting), one exponential
+  plus a constant background, by Poisson maximum likelihood (Fisher
+  scoring with a line search), with large-sample error bars and a
+  Pearson goodness of fit. `t_start` fits only the bins after the
+  excitation pulse and the timing response. It refuses malformed
+  counts or edges, fewer than 10 counts or too few bins, a background
+  that ends at zero, a lifetime that runs outside 1e-3 of the narrowest
+  bin to 1000 times the window, an amplitude that runs to zero, an
+  error bar above a quarter of the lifetime or amplitude, and
+  non-convergence. Tests: the closed-form maximum likelihood lifetime
+  of a background-free histogram, w / ln(1 + 1 / k_mean) (the bin index
+  is geometric; derived in the test), to 1e-9 relative, and its error
+  bar tau^2 (1 - p) / (w sqrt(N p)) to 1e-6; the exact expected
+  histogram (scaled to 1e12 counts) returns the truth to 1e-8; the
+  score equations hold at the fit; over 200 simulated experiments the
+  pulls have a mean within 0.25 and a spread within 15 % of 1; two
+  lifetimes fitted as one give p < 1e-6.
+- `purcell_from_lifetimes(tau_ref_s, tau_cav_s, ...)`
+  (`vacspin.cavity`, exported): the inverse of `CavityInterface` for
+  two measured lifetimes (cavity tuned away, cavity on resonance):
+  zeta = tau_ref / tau_cav, C = zeta - 1, beta = C / (1 + C); with an
+  `EmissionBudget` also F_C = 1 + C / a, and with `kappa_hz` also
+  g = (1/2) sqrt(C kappa / (2 pi tau_ref)), each with first-order error
+  bars and the covariance. Accepts numbers with error bars or two
+  `LifetimeFit` results. Refuses a cavity lifetime that is not shorter
+  than the reference, bad inputs, and a cooperativity known to worse
+  than a quarter of its value. Tests: given the lifetimes of a
+  `CavityInterface` design it returns that design's zeta, C, beta, F_C
+  and g_hz to 1e-12 relative (Q = 50, 500, 5000); error bars exact
+  where linear, and within 2 % of 400000 sampled inputs otherwise.
+- `fidelity(..., threshold=N)`: the fidelity at a given whole-number
+  threshold instead of the best one, and two new keys in every result,
+  `error_bright` (a bright shot gives fewer than N counts) and
+  `error_dark` (a dark shot gives N or more), from the count model
+  without `f0`. Existing keys and values are unchanged. Tests: Poisson
+  distribution function and complement (from `lgamma`) to 1e-9, the
+  geometric 1 - p^N to 1e-10, the threshold-1 closed form
+  e^(-N tau) P0 to 1e-12 relative, and a scan of 39 fixed thresholds
+  peaks at the best threshold.
+- `propagate_uncertainty` also takes a `LifetimeFit` (keys `tau_s`,
+  `amplitude`, `background_rate`). Tests: own error bar (1e-9
+  relative), the decay rate 1/tau (1e-6), A C A^T (1e-8).
+
+### Fixed
+
+- `cyclicity` and `rabi_rate` returned numbers set by round-off at a
+  field too weak to split the qubit pair. At zero field each Kramers
+  pair is exactly degenerate, so its two states are any orthonormal
+  pair; at 1e-15 T the splitting is below the eigensolver's round-off,
+  and at 1e-12 T only about 100 times above it. Example, SnV- set at
+  53 degrees (weak-field limit from degenerate perturbation theory:
+  cyclicity 7.85, Rabi rate 5.93 MHz for a 0.6 mT drive along lab x):
+  before, the cyclicity was infinite at zero field, 1.1e34 at 1e-15 T
+  and 9.06 at 1e-12 T, and the Rabi rate 2.5 MHz at 1e-15 T; after, a
+  `ValueError` that says the field does not resolve the pair. The
+  refusal applies when the pair (the qubit pair, and for `cyclicity`
+  also the excited pair it uses) is split by less than 1e-8 of the
+  largest energy of its manifold, where the eigenvector round-off eps
+  E_max / d would exceed about 2e-8; for the SnV- set that is below a
+  few microtesla (at most 6 uT in the lab x-z plane). SiV- and GeV-
+  without strain also refuse a field perpendicular to their axis,
+  where the qubit stays degenerate at any strength. Results at fields
+  that split the pairs are unchanged. Tests:
+  `test_unresolved_doublet_is_refused`,
+  `test_weak_field_values_equal_degenerate_perturbation_theory` (30
+  uT, 12 directions, 1e-5 relative) and
+  `test_threshold_matches_its_definition`.
+
+### Changed
+
+- Packaging: a `MANIFEST.in` adds `examples/`, `CHANGELOG.md`,
+  `CITATION.cff` and `CONTRIBUTING.md` to the source distribution, so
+  the tutorial tests run from an unpacked sdist instead of being
+  skipped. No new dependency.
+- Type hints on `fidelity`, `cyclicity` and the new functions.
+- Documentation: README sections for the new tools, their checks,
+  refusals and limits; a 0.8.0 correction note; the intro and Contents
+  list the new questions and the third tutorial. README examples 1 to 7
+  print the same numbers as in 0.7.0, and the two earlier tutorials
+  the same output. Test count 147 (122 before).
+
+### Performance
+
+- The bright-count recurrence inside `fidelity` (`_bright_pmf`) runs
+  on Python floats instead of NumPy scalars: the same IEEE double
+  operations in the same order. The test holds it to the 0.7.0 loop,
+  kept in the test, for 200 random cases within 1e-12 of the largest
+  value (`test_bright_pmf_equals_the_0_7_0_loop`). Measured CPU time,
+  median of 5 runs (3 for `optimal_window`), same machine, Python
+  3.13, NumPy 2.5.3: the recurrence at 100 / 1000 / 10000 counts 0.117
+  / 0.950 / 7.63 ms -> 0.050 / 0.379 / 2.41 ms (2.3x / 2.5x / 3.2x);
+  `fidelity` of the cavity design point with a 10 us window 17.9 ms ->
+  11.6 ms (1.5x); `optimal_window` of the same readout with the
+  default range up to 10 ms 3.45 s -> 2.41 s (1.4x). Readouts with few
+  counts (the confocal 50 us case, 0.21 ms) are not faster.
+
+### Tutorials
+
+- `examples/tutorial_lifetime_to_readout.py`: from two simulated
+  lifetime histograms (cavity tuned away and on resonance, fixed seed)
+  to both lifetimes, the measured lifetime shortening, cooperativity,
+  beta, Purcell factor and coupling rate against the Q_L = 500 design,
+  the best readout window, the fidelity with its error bar from the
+  two fits, and the errors of each spin state at the best threshold
+  and at threshold 1. Runs in under a second; its output is in the
+  README and its docstring, and `tests/test_tutorials.py` runs it and
+  checks the numbers (within 3 error bars of the simulated truth).
+
 ## 0.7.0 (2026-10-17)
 
 The readout window with the highest fidelity, error bars on anything

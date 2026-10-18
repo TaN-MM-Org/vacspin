@@ -32,6 +32,10 @@ optics around it, the package answers questions such as:
   error bars, and does the model describe the data at all?
 - Which readout window gives the highest fidelity, and how well is
   that fidelity known from your calibration?
+- From two lifetime measurements, with the cavity tuned away and on
+  resonance, what are the Purcell factor, cooperativity and coupling
+  rate of your cavity, with error bars? And how often does each spin
+  state give the wrong answer at the threshold your counter uses?
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -47,7 +51,7 @@ number that looks fine but is not.
 - [A short guide to the words used here](#a-short-guide-to-the-words-used-here)
 - [Install, units and conventions](#install-units-and-conventions)
 - [Examples](#examples) (each with the output it prints)
-- [Tutorials](#tutorials) (two end-to-end scripts in `examples/`)
+- [Tutorials](#tutorials) (three end-to-end scripts in `examples/`)
 - [Cited parameter sets](#cited-parameter-sets)
 - [What is in the package](#what-is-in-the-package)
 - [When it refuses, and why](#when-it-refuses-and-why)
@@ -158,7 +162,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.7.0 (the same as with 0.6.0). The cavity, detector, attempt-rate and
+printed with vacspin 0.8.0 (the same as with 0.6.0 and 0.7.0). The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -605,11 +609,12 @@ What the fit can and cannot tell:
 
 ## Tutorials
 
-Two scripts in the `examples/` folder of the repository go from data to
-a final result with error bars. Each makes its own "measured" data with
-a fixed random seed, so you can run it as is and then swap in your own
-numbers. Each runs in about a second. The test suite runs both and
-checks the numbers below.
+Three scripts in the `examples/` folder of the repository (and, since
+0.8.0, of the source distribution) go from data to a final result with
+error bars. Each makes its own "measured" data with a fixed random
+seed, so you can run it as is and then swap in your own numbers. Each
+runs in about a second. The test suite runs all three and checks the
+numbers below.
 
 ### The best readout window, from your count histograms
 
@@ -667,6 +672,43 @@ so it speeds up the spin-flipping line as much as the bright one. The
 dark spin's leak is the ratio of the off-resonant to the resonant
 scattering rate, from Eq. A8 of Rosenthal et al., PRX 14, 041008
 (2024), at a detuning of one qubit frequency.
+
+### From two lifetime histograms to the cavity and the readout
+
+`examples/tutorial_lifetime_to_readout.py` (new in 0.8.0) fits the
+excited-state lifetime of a center twice (`fit_lifetime_histogram`):
+with the cavity tuned away and on resonance. Each histogram holds about
+30000 decays and 3000 background counts in 16 ps bins. From the two
+lifetimes, `purcell_from_lifetimes` gives the lifetime shortening, the
+cooperativity, the share of photons into the cavity mode (`beta`), the
+Purcell factor and the coupling rate, and compares them with the
+Q_L = 500 design of example 2. Then it finds the best readout window,
+splits the fidelity into the error of each spin state, shows what
+happens at a threshold of 1 photon instead, and carries the lifetime
+error bars through to the fidelity. It printed:
+
+```
+lifetime, cavity detuned:      4.5466 +/- 0.0357 ns (simulated 4.5000), p = 0.94
+lifetime, cavity on resonance: 0.6107 +/- 0.0058 ns (simulated 0.6202), p = 0.41
+lifetime shortened 7.44 +/- 0.09 times: cooperativity 6.44 +/- 0.09, beta 0.8657 +/- 0.0017
+Purcell factor F_C = 19.84 +/- 0.27 (design 19.29), g = 7.39 +/- 0.08 GHz (design 7.32)
+readout: eta = 0.6168, best window 20.9 ns, threshold 2 photons
+  fidelity 0.98014 +/- 0.00027: bright error 0.00838, dark error 0.03134
+  at threshold 1 instead: fidelity 0.96795, bright error 0.00158, dark error 0.06251
+with the simulated lifetimes: fidelity 0.98051
+```
+
+The two lifetimes lie 1.3 and 1.6 error bars from the simulated ones.
+The first is high and the second low, so their ratio moves by both:
+the shortening, the cooperativity, `beta` and the Purcell factor land
+about 2.1 error bars from the design (the coupling rate 0.8, as it also
+carries the 2 % linewidth error). The predicted fidelity is 1.4 error
+bars from the fidelity of the simulated lifetimes. The lifetimes alone
+give the shortening, the cooperativity and `beta`; the Purcell factor
+also needs the emission budget, and the coupling rate the cavity
+linewidth. Lowering the threshold to 1 photon makes the
+bright spin fail less often, but the dark spin, which scatters a little
+light off-resonantly, now fails twice as often.
 
 ## Cited parameter sets
 
@@ -754,10 +796,13 @@ gives its inputs, units and conventions.
   transition strengths, and their energies.
 - `cyclicity` -- the cyclicity of the lowest ground state on the lower
   (`manifold="lower"`) or upper excited pair; infinite when the
-  spin-flip line is exactly dark.
+  spin-flip line is exactly dark. Since 0.8.0 it refuses a field too
+  weak to split the qubit pair or the excited pair (see
+  [When it refuses](#when-it-refuses-and-why)).
 - `rabi_rate` -- the microwave Rabi rate (GHz) for a drive field;
   `full_zeeman=True` adds the orbital and anisotropy Zeeman terms to
-  the drive.
+  the drive. Since 0.8.0 it refuses a static field too weak to split
+  the qubit pair.
 - `field_on_circle` -- a field of given size at an angle in one lab
   plane.
 
@@ -778,6 +823,15 @@ arXiv:2511.05740)
   of a competing same-spin line and a check that the cavity is
   narrower than their spacing. `beta_form="transition"` gives the
   `beta`, `g` and cooperativity of version 0.5.0 and earlier.
+- `purcell_from_lifetimes` (new in 0.8.0): the same budget measured
+  instead of designed: from the lifetime with the cavity tuned away and
+  the lifetime on resonance (numbers with error bars, or two
+  `LifetimeFit` results) it gives the lifetime shortening `zeta`, the
+  cooperativity `C = zeta - 1` and `beta = C / (1 + C)`; with an
+  `EmissionBudget` also the Purcell factor `F_C = 1 + C / a` (`a` the
+  radiative fraction), and with the cavity linewidth `kappa_hz` also
+  the coupling rate `g_hz`. Each comes with its error bar and the full
+  covariance.
 
 **Readout** (`vacspin.readout`; Rosenthal et al., arXiv:2403.13110,
 Appendix A)
@@ -795,7 +849,11 @@ Appendix A)
   count), `n_dark` (mean background plus leak count),
   `n_bright_total` and `n_dark_total` (the means of the two full
   distributions) and `truncation_bound` (a guaranteed bound, at most
-  1e-9, on the error from tracking a finite number of counts).
+  1e-9, on the error from tracking a finite number of counts). Since
+  0.8.0 it also returns `error_bright` (the chance that a bright shot
+  gives fewer counts than the threshold) and `error_dark` (the chance
+  that a dark shot reaches it), and `threshold=N` gives the fidelity at
+  the threshold your experiment uses instead of the best one.
 - `required_efficiency`, `required_window` -- the smallest efficiency
   or shortest window that reaches a target fidelity.
 - `optimal_window` (new in 0.7.0) -- the window with the highest
@@ -831,7 +889,9 @@ Appendix A)
   parameters, by first-order error propagation. Since 0.7.0 it also
   takes a `ReadoutFit`; your function then receives a dict with the
   keys `eta`, `lam` and `noise_rate`, for example to get the error bar
-  of the fidelity at a window you have not measured.
+  of the fidelity at a window you have not measured. Since 0.8.0 it
+  also takes a `LifetimeFit` (keys `tau_s`, `amplitude`,
+  `background_rate`).
 - `save_observations_csv`, `load_observations_csv` -- a plain CSV
   format for observation records (columns `kind, bx_t, by_t, bz_t,
   value_ghz` and optionally `sigma_ghz`). Since 0.5.0 the loader also
@@ -843,6 +903,16 @@ Appendix A)
   `values`, `sigma`, `cov`, `log_likelihood`, and a Pearson goodness
   of fit (`chi2`, `chi2_dof`, `p_value`, after pooling count bins until
   each expects at least 5 shots).
+- `fit_lifetime_histogram` (new in 0.8.0): fit the excited-state
+  lifetime to a time-resolved photon histogram (time-correlated single
+  photon counting), with a constant background, by Poisson maximum
+  likelihood. Returns a `LifetimeFit` with `tau_s`, `sigma_tau_s`,
+  `values` (`tau_s`, `amplitude`, `background_rate`), `sigma`, `cov`
+  and a Pearson goodness of fit (`chi2`, `chi2_dof`, `p_value`, after
+  pooling bins until each expects at least 5 counts). `t_start` fits
+  only the bins after a given delay, to leave out the excitation pulse
+  and the detector's timing response; `background=False` holds the
+  background at zero.
 
 `__version__` gives the installed version.
 
@@ -911,11 +981,41 @@ Appendix A)
   finite with `0 < tau_min < tau_max`;
 - in `propagate_uncertainty` with a `ReadoutFit`: a function that
   returns a non-finite value or slope, or a covariance that does not
-  match the fitted parameters.
+  match the fitted parameters;
+- in `cyclicity` and `rabi_rate` (since 0.8.0): a field too weak to
+  split the qubit pair (and, for `cyclicity`, the excited pair it
+  uses), that is, split by less than 1e-8 of the largest energy of its
+  manifold. Then the two states of the pair are set by round-off, not
+  by the field. At zero field this always happens, and for a center
+  without strain or orbital terms (the SiV- and GeV- sets) also in a
+  field perpendicular to its axis. For the SnV- set it happens below a
+  few microtesla (at most 6 uT for fields in the lab x-z plane);
+- in `fidelity` (since 0.8.0): a `threshold` that is not a whole
+  number of counts from 1 to 2^18;
+- in `fit_lifetime_histogram` (since 0.8.0): counts that are not a 1-D
+  array of whole numbers; bin edges that are not finite and strictly
+  increasing, or not one more than the counts; fewer than 10 counts, or
+  too few bins for the fit to have a spare degree of freedom; a
+  `t_start` or `tau_start` that is not a finite number (and a positive
+  one, for `tau_start`); no counts above the background; a best fit
+  whose background ends at zero (refit with `background=False`); a
+  lifetime that runs below 1e-3 of the narrowest bin or above 1000
+  times the fitted window, or an amplitude that runs to zero (no decay
+  this fit can measure); a lifetime or amplitude whose error bar is
+  more than a quarter of the value; parameters the histogram cannot
+  tell apart; or a fit that does not converge (`RuntimeError`);
+- in `purcell_from_lifetimes` (since 0.8.0): a lifetime that is not
+  positive and finite, an error bar that is negative or not finite, an
+  error bar given together with a `LifetimeFit` (which carries its
+  own), a cavity lifetime that is not shorter than the reference
+  lifetime, a `budget` that is not an `EmissionBudget`, a `kappa_hz`
+  that is not positive and finite, or a cooperativity whose error bar
+  is more than a quarter of its value (first-order error bars are then
+  not reliable).
 
 ## How the results are checked
 
-122 automated tests run on every push and pull request, on Python 3.9,
+147 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -955,6 +1055,15 @@ checks, with the tolerances the tests actually use:
 - The Hamiltonian built from precomputed matrices (since 0.4.0, for
   speed) equals the term-by-term construction for 50 random inputs
   (to 1e-12 GHz).
+- Weak fields (since 0.8.0): at 30 uT in 12 directions the cyclicity
+  and the Rabi rate equal degenerate perturbation theory (the Zeeman
+  operator diagonalized inside the zero-field pairs, a separate
+  calculation) to 1 part in 10^5; at 53 degrees that limit is 7.85 and
+  5.93 MHz. At 1e-15 T, 1e-12 T and zero field both functions refuse
+  (0.7.0 returned 1.1e34, 9.06 and infinity for the cyclicity), as
+  they do for SiV- in a field perpendicular to its axis, and the
+  refusal sits where the qubit splitting crosses 1e-8 of the largest
+  ground energy (1 % above it passes, 1 % below refuses).
 
 **Against published measurements (SnV-, no fitted numbers)**
 
@@ -1065,6 +1174,20 @@ checks, with the tolerances the tests actually use:
   without background the fidelity is `1 - P0(eta)/2` in closed form,
   and the returned efficiency equals the closed-form one (to 1 part in
   10^5); 0.4.0 returned 1e-6.
+- A given threshold and the two errors (since 0.8.0): without spin
+  flips, `error_bright` and `error_dark` equal the Poisson distribution
+  function and its complement (summed independently from `lgamma`, to
+  1e-9) at six thresholds in two cases, and the fidelity equals
+  `f0 (1 - (error_bright + error_dark) / 2) + (1 - f0) / 2` (to
+  1e-15); when every bright record ends in a flip, `error_bright`
+  equals the geometric `1 - p^N` (to 1e-10); at threshold 1 with flips
+  and background it equals `e^(-N tau) P0` (to 1 part in 10^12). In
+  three cases a scan of 39 fixed thresholds peaks at the best
+  threshold with the best fidelity (to 1e-12).
+- The bright-count loop on Python floats (since 0.8.0, for speed)
+  equals the 0.7.0 loop, kept in the test, for 200 random cases (to
+  1e-12 of the largest value; it performs the same operations in the
+  same order).
 
 **The source study's design point** (Q = 500 cavity, from the study's
 stated inputs, with the qubit frequency computed by the package)
@@ -1166,8 +1289,41 @@ since 0.5.0)
   uncertainty. Over 150 simulated experiments of the counting process,
   (prediction minus true fidelity) / error bar has a spread within
   20 % of 1 and a mean within 0.25 of 0.
-- The two tutorials run, print the numbers documented here, and land
-  within 3 error bars of the simulated truth.
+- The tutorials run, print the numbers documented here, and land
+  within 3 error bars of the simulated truth (for the lifetime
+  tutorial: both lifetimes, the design's Purcell factor and coupling
+  rate, and the fidelity of the simulated lifetimes).
+
+**Lifetimes and the measured cavity budget** (since 0.8.0)
+
+- Without background, with equal bins of width `w` and a window of 40
+  lifetimes, the bin index of a count is geometric, so the maximum
+  likelihood lifetime is `w / ln(1 + 1 / k_mean)` (`k_mean` the mean
+  bin index) with the error bar `tau^2 (1 - p) / (w sqrt(N p))`,
+  `p = e^(-w / tau)`. The fit equals both (to 1 part in 10^9 and
+  10^6).
+- The exact expected histogram (background, and a decay that starts
+  at 0, fitted from 0.5 ns on), scaled to 10^12 counts and rounded,
+  returns the true lifetime, amplitude and background (to
+  1 part in 10^8).
+- At the fit the Poisson score equations hold (computed from scratch
+  in the test, to 1e-6 of the total count) and the fitted counts add up
+  to the measured ones (to 1 part in 10^9).
+- 200 simulated experiments (a 0.62 ns lifetime, 4000 decays, 400
+  background counts, 16 ps bins): (fit minus truth) / error bar has a
+  mean within 0.25 of 0 and a spread within 15 % of 1, and at least
+  95 % of the p-values are above 0.01. Two lifetimes fitted as one give
+  a p-value below 10^-6.
+- `propagate_uncertainty` with a `LifetimeFit` returns the lifetime's
+  own error bar (to 1e-9 relative), `sigma / tau^2` for the decay rate
+  `1 / tau` (to 1e-6 relative) and `A C A^T` for a linear combination
+  (to 1e-8 relative).
+- `purcell_from_lifetimes` given the lifetimes of a `CavityInterface`
+  design returns its `zeta`, cooperativity, `beta`, `F_C` and `g_hz`
+  (to 1 part in 10^12) at Q = 50, 500 and 5000; its error bars are
+  exact where a result is linear in one lifetime, and within 2 % of the
+  spread of 400000 sampled inputs elsewhere, with the right
+  correlation (to 0.01).
 
 **Inputs**
 
@@ -1177,6 +1333,21 @@ since 0.5.0)
   `xi_pol_overlap`; a target fidelity must be a real number.
 
 ## Corrections in earlier versions
+
+**0.8.0 refuses a cyclicity or Rabi rate at a field too weak to split
+the qubit.** At zero field each pair of states is exactly degenerate,
+so its two states can be any pair, and the cyclicity and Rabi rate
+depend on the direction from which the field goes to zero. At 1e-12 T
+the pair is split by only about 100 times the round-off of the
+calculation, and the states it returns are off by about a percent;
+at 1e-15 T the split is below the round-off. Up to 0.7.0 both functions returned
+whatever pair the eigensolver happened to pick: for the SnV- set at
+53 degrees the cyclicity came out infinite at zero field, 1.1e34 at
+1e-15 T and 9.06 at 1e-12 T, where the weak-field limit is 7.85, and
+the Rabi rate came out 2.5 MHz at 1e-15 T instead of 5.93 MHz. Both
+now refuse a pair split by less than 1e-8 of the largest energy of its
+manifold (for SnV-, fields below a few microtesla). Every result at a
+field that splits the pairs is unchanged.
 
 **0.7.0 refuses a cavity whose Purcell factor is below 1.** For a
 large-volume resonator, for example Q_L = 1000 and V = 100
@@ -1324,6 +1495,20 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   an error bar is large compared with the scale on which the predicted
   quantity curves (or reaches a boundary such as zero strain), sample
   the fit's uncertainty instead.
+- **Lifetime fits** (`fit_lifetime_histogram`, since 0.8.0) fit one
+  exponential decay plus a constant background. They do not
+  deconvolve the instrument response (start the fit after it with
+  `t_start`), and they assume that each bin count is Poisson (no
+  pile-up: keep the detection probability per pulse small) and that
+  each decay ends within the pulse period. The error bars are
+  large-sample error bars. Two lifetimes, or a background that is not
+  flat, show up as a small `p_value`.
+- **`purcell_from_lifetimes`** (since 0.8.0) reads the whole
+  shortening of the lifetime as Purcell enhancement on the coupled
+  line. The reference lifetime must be that of the same emitter with
+  the cavity tuned away; anything else that changes between the two
+  measurements is counted as cavity effect. The two error bars are
+  taken as independent, and the propagation is first-order.
 - **`optimal_window`** finds the highest peak it sees on an 80-point
   scan and refines it. The fidelity is the larger of smooth curves (one
   per threshold), so it can have more than one local peak; a narrow

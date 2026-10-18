@@ -1,0 +1,4 @@
+# Also ship the worked tutorials (the tutorial tests run them), the
+# changelog and the citation file in the source distribution.
+recursive-include examples *.py
+include CHANGELOG.md CITATION.cff CONTRIBUTING.md
