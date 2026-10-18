@@ -50,6 +50,11 @@ Since 0.5.0 two more tools check a lab's own data against the model:
   and background of the readout model (`vacspin.readout`) to measured
   single-shot photon-count histograms by maximum likelihood, with
   large-sample error bars and a Pearson goodness-of-fit test.
+
+Since 0.8.0 `fit_lifetime_histogram` fits the excited-state lifetime to
+a time-resolved photon histogram (Poisson maximum likelihood, constant
+background); `vacspin.purcell_from_lifetimes` turns two such lifetimes
+into the measured cavity budget.
 """
 from __future__ import annotations
 
@@ -68,6 +73,7 @@ from .readout import (_check_background, _check_common,
                       _exp_poisson_integrals, _switch_on_pmf, poisson_pmf)
 
 __all__ = ["SpinFit", "fit_spin_parameters", "parameter_information",
+           "LifetimeFit", "fit_lifetime_histogram",
            "propagate_uncertainty",
            "design_fields", "save_observations_csv",
            "load_observations_csv", "ReadoutFit",
@@ -496,12 +502,21 @@ def propagate_uncertainty(fit, func, rel_step: float = 1e-6) -> dict:
     smooth curves (one per threshold), so at a window where two
     thresholds tie its slope jumps; the propagated error bar is then
     that of one side.
+
+    Since 0.8.0 `fit` can also be a `LifetimeFit` from
+    `fit_lifetime_histogram`; `func` then receives a dict with the keys
+    "tau_s", "amplitude" and "background_rate". The step is one-sided
+    only where the other side leaves the range (a lifetime or amplitude
+    at or below 0, a negative background).
     """
     if isinstance(fit, ReadoutFit):
         return _propagate_readout(fit, func, rel_step)
+    if isinstance(fit, LifetimeFit):
+        return _propagate_readout(fit, func, rel_step, _lifetime_in_range)
     if not isinstance(fit, SpinFit):
-        raise TypeError("fit must be a SpinFit from fit_spin_parameters "
-                        "or a ReadoutFit from fit_readout_histograms")
+        raise TypeError("fit must be a SpinFit from fit_spin_parameters, "
+                        "a ReadoutFit from fit_readout_histograms or a "
+                        "LifetimeFit from fit_lifetime_histogram")
     if not (np.isfinite(rel_step) and 0.0 < rel_step < 1e-2):
         raise ValueError("rel_step must be in (0, 1e-2)")
     vary = tuple(fit.values)
@@ -1204,10 +1219,11 @@ def _readout_in_range(name, v):
     return v >= 0.0                                  # noise_rate
 
 
-def _propagate_readout(fit, func, rel_step):
-    """`propagate_uncertainty` for a `ReadoutFit` (since 0.7.0): the
-    same first-order propagation J cov J^T, with `func` taking a dict
-    of the three readout parameters."""
+def _propagate_readout(fit, func, rel_step, in_range=_readout_in_range):
+    """`propagate_uncertainty` for a `ReadoutFit` (since 0.7.0) and a
+    `LifetimeFit` (since 0.8.0, with its own `in_range`): the same
+    first-order propagation J cov J^T, with `func` taking a dict of the
+    fit's parameters."""
     if not (np.isfinite(rel_step) and 0.0 < rel_step < 1e-2):
         raise ValueError("rel_step must be in (0, 1e-2)")
     vary = tuple(fit.vary)
@@ -1231,8 +1247,8 @@ def _propagate_readout(fit, func, rel_step):
     jac = np.empty((f0.size, x.size))
     for j, name in enumerate(vary):
         h = rel_step * max(abs(x[j]), sig[j])
-        up_ok = _readout_in_range(name, x[j] + h)
-        down_ok = _readout_in_range(name, x[j] - h)
+        up_ok = in_range(name, x[j] + h)
+        down_ok = in_range(name, x[j] - h)
         xp, xm = x.copy(), x.copy()
         xp[j] += h
         xm[j] -= h
@@ -1254,3 +1270,380 @@ def _propagate_readout(fit, func, rel_step):
                 "cov": cov}
     return {"value": value, "sigma": sigma.reshape(value.shape),
             "cov": cov}
+
+
+# ---------------------------------------------------------------------------
+# Lifetime from a time-resolved photon histogram (since 0.8.0)
+# ---------------------------------------------------------------------------
+
+_LIFETIME_NAMES = ("tau_s", "amplitude", "background_rate")
+
+
+@dataclasses.dataclass
+class LifetimeFit:
+    """Result of `fit_lifetime_histogram`.
+
+    tau_s, sigma_tau_s : the fitted excited-state lifetime (s) and its
+        1-sigma error bar.
+    values : "tau_s", "amplitude" (the expected number of decay counts
+        from the first fitted bin edge on, summed to infinite delay) and
+        "background_rate" (constant background, in counts per second of
+        delay; 0 when no background was fitted).
+    sigma : 1-sigma error bar of each fitted parameter, by name.
+    cov : covariance matrix of the fitted parameters, in `vary` order.
+    vary : the fitted names, in order.
+    log_likelihood : the maximized Poisson log-likelihood,
+        sum over bins of n log(mu) - mu (the constant -log(n!) left out).
+    chi2, chi2_dof, p_value : Pearson goodness of fit, after pooling
+        neighboring bins until each expects at least 5 counts (None when
+        no degrees of freedom are left).
+    n_counts : counts in the fitted bins; n_bins : bins fitted;
+    t_start_s : the first fitted bin edge (the time origin of
+    `amplitude`); condition_number : of the scale-free information
+    matrix; n_iter : iterations used.
+    """
+
+    tau_s: float
+    sigma_tau_s: float
+    values: dict
+    sigma: dict
+    cov: np.ndarray
+    vary: tuple
+    log_likelihood: float
+    chi2: Optional[float]
+    chi2_dof: Optional[int]
+    p_value: Optional[float]
+    n_counts: int
+    n_bins: int
+    t_start_s: float
+    condition_number: float
+    n_iter: int
+
+
+def _lifetime_in_range(name, v):
+    """Whether a value is inside the lifetime model's range."""
+    if not np.isfinite(v):
+        return False
+    if name == "background_rate":
+        return v >= 0.0
+    return v > 0.0                                  # tau_s, amplitude
+
+
+def _decay_shape(edges, tau):
+    """Share of an exponential decay (lifetime tau, starting at
+    edges[0]) that falls in each bin, and its derivative with respect
+    to tau, both written without cancellation for narrow bins:
+
+        u_i = e^{-x_i} (1 - e^{-d_i}),
+        du_i/dtau = e^{-x_i} (x_i (1 - e^{-d_i}) - d_i e^{-d_i}) / tau,
+
+    with x_i = (t_i - t_0) / tau and d_i = (t_{i+1} - t_i) / tau."""
+    x = (edges[:-1] - edges[0]) / tau
+    d = np.diff(edges) / tau
+    ex = np.exp(-x)
+    one_m = -np.expm1(-d)
+    u = ex * one_m
+    du = ex * (x * one_m - d * np.exp(-d)) / tau
+    return u, du
+
+
+def _pooled_pearson_poisson(n, mu):
+    """Pearson chi2 of Poisson bin counts n against their fitted means
+    mu, after pooling neighboring bins (from early delays on) until each
+    expects at least 5 counts. Returns (chi2, number of pooled bins)."""
+    bins_o, bins_e = [], []
+    acc_o = acc_e = 0.0
+    for o, e in zip(n, mu):
+        acc_o += o
+        acc_e += e
+        if acc_e >= _POOL_MIN_EXPECTED:
+            bins_o.append(acc_o)
+            bins_e.append(acc_e)
+            acc_o = acc_e = 0.0
+    if bins_e:
+        bins_o[-1] += acc_o
+        bins_e[-1] += acc_e
+    else:
+        bins_o, bins_e = [acc_o], [acc_e]
+    o = np.array(bins_o)
+    e = np.array(bins_e)
+    return float(np.sum((o - e) ** 2 / e)), len(bins_e)
+
+
+def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
+                           t_start: Optional[float] = None,
+                           tau_start: Optional[float] = None,
+                           max_iter: int = 200) -> LifetimeFit:
+    """Fit an excited-state lifetime to a time-resolved photon histogram.
+
+    In a lifetime measurement (time-correlated single-photon counting)
+    the emitter is excited by short pulses and each detected photon's
+    delay after its pulse is histogrammed. With a lifetime tau the
+    expected counts in the bin [t_i, t_{i+1}] are
+
+        mu_i = A (e^{-(t_i - t_0)/tau} - e^{-(t_{i+1} - t_0)/tau})
+               + B (t_{i+1} - t_i),
+
+    with t_0 the first fitted bin edge, A the number of decay counts
+    after t_0 (summed to infinite delay) and B a constant background in
+    counts per second of delay (detector dark counts, stray light).
+    Each bin count is Poisson, as it is when a pulse rarely yields more
+    than one detected photon.
+
+    counts : the histogram, one whole number of counts per bin.
+    bin_edges_s : the bin edges in seconds (one more than `counts`),
+        strictly increasing; bins may have different widths.
+    background : fit B (default) or hold it at 0.
+    t_start : fit only the bins whose left edge is at or after this
+        delay (s). Start after the excitation pulse and the detector's
+        timing response have died away: this function fits the decay
+        tail and does not deconvolve an instrument response.
+    tau_start : optional starting lifetime (s); by default the start
+        comes from the mean delay of the counts above the background.
+
+    Method: Poisson maximum likelihood by Fisher scoring with a line
+    search; error bars from the inverse of the expected information at
+    the optimum (large-sample error bars), and a Pearson goodness of
+    fit. The tests check the fit against the closed-form maximum
+    likelihood lifetime of a background-free histogram,
+    tau = w / ln(1 + 1 / k_mean) for bins of width w and mean bin index
+    k_mean, and its error bar, and against simulated experiments.
+
+    Returns a `LifetimeFit`. Refuses, with the reason: counts that are
+    not a 1-D array of whole numbers, edges that are not finite and
+    strictly increasing or do not match the counts, fewer than 10
+    counts or too few bins in the fitted range, a fit whose background
+    ends at zero (refit with background=False), a lifetime or amplitude
+    whose error bar exceeds a quarter of its value (for example a
+    lifetime much shorter than one bin or much longer than the
+    window), parameters the data cannot tell apart, and a fit that does
+    not converge (RuntimeError).
+
+    Not modeled: the instrument response (fit from `t_start` after it),
+    pile-up (keep the detection probability per pulse small), and decay
+    left over from earlier pulses (the pulse period should be many
+    lifetimes long).
+    """
+    try:
+        n_all = np.asarray(counts, dtype=float)
+        edges_all = np.asarray(bin_edges_s, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError("counts and bin_edges_s must be arrays of "
+                         "numbers") from None
+    if n_all.ndim != 1 or n_all.size == 0:
+        raise ValueError("counts must be a 1-D array: one whole number of "
+                         "counts per delay bin")
+    if not np.all(np.isfinite(n_all)) or np.any(n_all < 0) \
+            or np.any(n_all != np.round(n_all)):
+        raise ValueError("counts must be non-negative whole numbers")
+    if edges_all.shape != (n_all.size + 1,):
+        raise ValueError("bin_edges_s must hold one more entry than "
+                         "counts (the edges of every bin, in seconds)")
+    if not np.all(np.isfinite(edges_all)) or np.any(np.diff(edges_all)
+                                                    <= 0.0):
+        raise ValueError("bin_edges_s must be finite and strictly "
+                         "increasing")
+    if not isinstance(background, (bool, np.bool_)):
+        raise ValueError("background must be True or False")
+    background = bool(background)
+    if t_start is None:
+        first = 0
+    else:
+        try:
+            t0 = float(t_start)
+        except (TypeError, ValueError):
+            t0 = float("nan")
+        if not np.isfinite(t0):
+            raise ValueError("t_start must be a finite delay in seconds")
+        first = int(np.searchsorted(edges_all[:-1], t0, side="left"))
+    n = n_all[first:]
+    edges = edges_all[first:]
+    vary = _LIFETIME_NAMES if background else _LIFETIME_NAMES[:2]
+    n_par = len(vary)
+    if n.size < n_par + 1:
+        raise ValueError(f"{n.size} bins in the fitted range; at least "
+                         f"{n_par + 1} are needed to fit {n_par} "
+                         "parameters with a spare degree of freedom")
+    n_tot = float(n.sum())
+    if n_tot < _MIN_SHOTS:
+        raise ValueError(f"the fitted range holds {int(n_tot)} counts; at "
+                         f"least {_MIN_SHOTS} are needed (the error bars "
+                         "are large-sample error bars)")
+    widths = np.diff(edges)
+    span = float(edges[-1] - edges[0])
+    if tau_start is not None:
+        try:
+            tau_s0 = float(tau_start)
+        except (TypeError, ValueError):
+            tau_s0 = float("nan")
+        if not (np.isfinite(tau_s0) and tau_s0 > 0.0):
+            raise ValueError("tau_start must be a positive lifetime in s")
+
+    # --- starting values --------------------------------------------------
+    b0 = 0.0
+    if background:
+        n_tail = max(1, n.size // 10)
+        b0 = float(n[-n_tail:].sum() / widths[-n_tail:].sum())
+        if b0 <= 0.0:
+            b0 = 0.5 / float(widths[-n_tail:].sum())
+    excess = np.maximum(n - b0 * widths, 0.0)
+    if excess.sum() <= 0.0:
+        raise ValueError("no counts above the background: there is no "
+                         "decay to fit")
+    if tau_start is None:
+        mid = 0.5 * (edges[:-1] + edges[1:]) - edges[0]
+        t_mean = float(np.dot(excess, mid) / excess.sum())
+
+        def trunc_mean(t):          # mean of an exponential cut at span
+            y = span / t
+            if y > 700.0:
+                return t
+            return t - span / math.expm1(y)
+
+        if t_mean >= 0.5 * span * (1.0 - 1e-9):
+            tau_s0 = 10.0 * span
+        else:
+            lo, hi = 1e-6 * span, 1e3 * span
+            for _ in range(200):
+                mid_t = math.sqrt(lo * hi)
+                lo, hi = (mid_t, hi) if trunc_mean(mid_t) < t_mean \
+                    else (lo, mid_t)
+            tau_s0 = math.sqrt(lo * hi)
+    a0 = max(float(excess.sum()) / max(-math.expm1(-span / tau_s0), 1e-300),
+             1.0)
+    x = np.array([tau_s0, a0, b0][:n_par], dtype=float)
+    seen = n > 0
+
+    def model(xv):
+        u, du = _decay_shape(edges, xv[0])
+        mu = xv[1] * u + (xv[2] * widths if background else 0.0)
+        return mu, u, du
+
+    def valid(xv):
+        return (np.all(np.isfinite(xv)) and xv[0] > 0.0 and xv[1] > 0.0
+                and (not background or xv[2] >= 0.0))
+
+    def loglik(mu):
+        if np.any(mu[seen] <= 0.0):
+            return -np.inf
+        return float(np.sum(n[seen] * np.log(mu[seen])) - np.sum(mu))
+
+    def score_info(xv):
+        mu, u, du = model(xv)
+        grads = [xv[1] * du, u] + ([widths] if background else [])
+        g = np.array(grads)                              # (p, bins)
+        w = np.zeros_like(mu)
+        pos = mu > 0.0
+        resid = np.zeros_like(mu)
+        # a mean count near the underflow limit gives an infinite weight;
+        # the step is then not finite and the fit refuses below
+        with np.errstate(over="ignore", invalid="ignore"):
+            w[pos] = 1.0 / mu[pos]
+            info = (g * w) @ g.T
+            resid[pos] = n[pos] / mu[pos] - 1.0
+            score = g @ resid
+        return score, info, mu
+
+    mu, _, _ = model(x)
+    ll = loglik(mu)
+    if not np.isfinite(ll):                         # pragma: no cover
+        raise ValueError("the starting values give zero probability to an "
+                         "observed count; give tau_start")
+    u_vec, info, _ = score_info(x)
+    singular_msg = ("this histogram cannot determine "
+                    f"{', '.join(vary)} together (singular information "
+                    "matrix): check that the fitted range holds a decay, "
+                    "with bins finer than the lifetime and a window "
+                    "longer than it")
+    converged = False
+    it = 0
+    for it in range(1, max_iter + 1):
+        d = np.sqrt(np.diag(info))
+        step = None
+        if np.all(np.isfinite(d)) and np.all(d > 0.0):
+            try:
+                step = np.linalg.solve(info / np.outer(d, d), u_vec / d) / d
+            except np.linalg.LinAlgError:
+                step = None
+        if step is None or not np.all(np.isfinite(step)):
+            raise ValueError(singular_msg)
+        alpha, moved = 1.0, False
+        for _ in range(60):
+            x_new = x + alpha * step
+            if background and x_new[2] < 0.0:
+                x_new[2] = 0.0                 # project onto B >= 0
+            if valid(x_new):
+                mu_new, _, _ = model(x_new)
+                ll_new = loglik(mu_new)
+                if ll_new >= ll - 1e-12 * abs(ll):
+                    moved = True
+                    break
+            alpha *= 0.5
+        if not moved:
+            converged = True                   # no ascent direction left
+            break
+        dx = x_new - x
+        gain = ll_new - ll
+        x, ll = x_new, ll_new
+        if x[1] < 1e-6 * n_tot:
+            raise ValueError(
+                f"the decay amplitude runs to {x[1]:.3g} counts, below "
+                f"1e-6 of the {int(n_tot)} counts fitted: the histogram "
+                "shows no decay above the background")
+        if x[0] > 1e3 * span or x[0] < 1e-3 * float(widths.min()):
+            raise ValueError(
+                f"the lifetime runs to {x[0]:.3g} s, outside 1e-3 of the "
+                f"narrowest bin ({float(widths.min()):.3g} s) to 1e3 times "
+                f"the fitted window ({span:.3g} s): the histogram does not "
+                "show a decay this fit can measure. Use bins finer than "
+                "the lifetime and a window several lifetimes long")
+        u_vec, info, _ = score_info(x)
+        scale = np.abs(x)
+        if background:
+            # the background can be 0: measure its step against the
+            # mean count rate instead
+            scale[2] = max(scale[2], n_tot / span)
+        if np.all(np.abs(dx) <= 1e-10 * scale) or (
+                gain <= 1e-12 * abs(ll) and np.all(np.abs(dx)
+                                                   <= 1e-7 * scale)):
+            converged = True
+            break
+    if not converged:
+        raise RuntimeError("lifetime fit did not converge (the histogram "
+                           "may show no clear decay above the "
+                           "background); give tau_start, or check the "
+                           "bin edges and the fitted range")
+    if background and x[2] <= 1e-9 * n_tot / span:
+        raise ValueError(
+            "the best fit has no background (the background rate ends at "
+            "its lower limit 0), where large-sample error bars do not "
+            "apply; refit with background=False")
+    ok, cond, cov, sig = _invert_information(info, vary)
+    if not ok:
+        raise ValueError(singular_msg)
+    vals = dict(zip(vary, (float(v) for v in x)))
+    weak = [k for k in ("tau_s", "amplitude")
+            if sig[k] > _MAX_REL_SIGMA * vals[k]]
+    if weak:
+        found = ", ".join(f"{k} = {vals[k]:.4g} +/- {sig[k]:.2g}"
+                          for k in weak)
+        raise ValueError(
+            f"poorly determined: {found}. When an error bar exceeds a "
+            "quarter of the value, large-sample error bars are not "
+            "reliable. Use bins finer than the lifetime, a window several "
+            "lifetimes long, or more counts")
+    mu, _, _ = model(x)
+    chi2, bins = _pooled_pearson_poisson(n, mu)
+    dof = bins - n_par
+    if dof >= 1:
+        p_val = _chi2_sf(chi2, dof)
+    else:
+        chi2, dof, p_val = None, None, None
+    values = {"tau_s": vals["tau_s"], "amplitude": vals["amplitude"],
+              "background_rate": vals.get("background_rate", 0.0)}
+    return LifetimeFit(tau_s=values["tau_s"], sigma_tau_s=sig["tau_s"],
+                       values=values, sigma=sig, cov=cov, vary=vary,
+                       log_likelihood=float(ll), chi2=chi2, chi2_dof=dof,
+                       p_value=p_val, n_counts=int(n_tot),
+                       n_bins=int(n.size), t_start_s=float(edges[0]),
+                       condition_number=cond, n_iter=it)

@@ -35,6 +35,31 @@ _PX = np.kron(np.array([[1.0, 0.0], [0.0, -1.0]]), _I2)
 _PY = np.kron(np.array([[0.0, -1.0], [-1.0, 0.0]]), _I2)
 _PZ = np.kron(_I2, _I2)
 
+# The two states of a Kramers doublet split by d, inside a manifold whose
+# energies reach E_max, come out of the eigensolver with a round-off error
+# of about eps E_max / d (eps = 2.2e-16). Below d = 1e-8 E_max that error
+# would exceed about 2e-8, so such a doublet counts as unresolved.
+_MIN_REL_SPLIT = 1e-8
+
+
+def _require_split(evals, i, what, quantity):
+    """Refuse when states i and i + 1 (a Kramers doublet) are not split
+    by more than _MIN_REL_SPLIT of the manifold's energy scale: their
+    individual eigenvectors, and anything built from them, are then set
+    by round-off, not by the field (since 0.8.0)."""
+    scale = float(np.max(np.abs(evals)))
+    gap = float(evals[i + 1] - evals[i])
+    if not gap > _MIN_REL_SPLIT * scale:
+        raise ValueError(
+            f"the field does not resolve the {what} doublet: it is split "
+            f"by {gap:.3g} GHz, below {_MIN_REL_SPLIT:g} of the manifold's "
+            f"{scale:.4g} GHz energy scale, so its two states and the "
+            f"{quantity} are not defined (at zero field the {quantity} "
+            "depends on the direction from which the field goes to zero). "
+            "A center without strain or orbital terms also stays "
+            "degenerate in a field perpendicular to its axis. Use a "
+            "field that splits the doublet")
+
 
 def transition_strength(ket_g, ket_e):
     """|<e|p|g>|^2 summed over the three dipole components."""
@@ -74,8 +99,8 @@ def transition_table(params: SpinParameters, b_lab, strain_scale=1.0):
                 evals_g=eg, evals_e=ee)
 
 
-def cyclicity(params: SpinParameters, b_lab, strain_scale=1.0,
-              manifold="lower"):
+def cyclicity(params: SpinParameters, b_lab, strain_scale: float = 1.0,
+              manifold: str = "lower") -> float:
     """Cyclicity Lambda of the lowest ground doublet.
 
     The spin-conserving partner of |g0> is whichever state of the
@@ -83,7 +108,17 @@ def cyclicity(params: SpinParameters, b_lab, strain_scale=1.0,
     'upper': the A/B doublet, states 2-3) has the larger dipole
     strength; Lambda is its strength from |g0> divided by its strength
     from |g1>. Diverges for a field exactly along the <111> axis
-    (asserted, not stated, in the tests)."""
+    (asserted, not stated, in the tests).
+
+    Since 0.8.0 it refuses (ValueError) a field that does not resolve
+    the qubit doublet or the chosen excited doublet (split by less than
+    1e-8 of the manifold's energy scale; for the SnV- set, fields below
+    a few microtesla, at most 6 uT for any direction in the lab x-z
+    plane): zero field, or a field perpendicular to the axis of a center
+    without strain or orbital terms. Before, it returned whatever the
+    eigensolver's arbitrary choice of states gave, for example infinity
+    at zero field and 1.1e34 at 1e-15 T, where the weak-field limit at
+    53 degrees is 7.85."""
     eg, vg, ee, ve = solve(params, b_lab, strain_scale)
     if manifold == "lower":
         i0 = 0
@@ -91,6 +126,8 @@ def cyclicity(params: SpinParameters, b_lab, strain_scale=1.0,
         i0 = 2
     else:
         raise ValueError('manifold must be "lower" or "upper"')
+    _require_split(eg, 0, "qubit (lowest ground)", "cyclicity")
+    _require_split(ee, i0, f"{manifold} excited", "cyclicity")
     s0 = transition_strength(vg[:, 0], ve[:, i0])
     s1 = transition_strength(vg[:, 0], ve[:, i0 + 1])
     j = i0 if s0 >= s1 else i0 + 1
@@ -123,12 +160,20 @@ def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
     one.
 
     Since 0.7.0 a drive field with a NaN or infinite component is
-    refused with a ValueError (a NaN drive returned NaN before)."""
+    refused with a ValueError (a NaN drive returned NaN before).
+
+    Since 0.8.0 a static field that does not resolve the qubit doublet
+    (split by less than 1e-8 of the ground manifold's energy scale; for
+    the SnV- set, at most 0.41 uT for fields in the lab x-z plane) is
+    refused: the two qubit states, and so
+    the Rabi rate, are then set by round-off (at 1e-15 T the rate came
+    out 2.5 MHz, where the weak-field limit is 5.9 MHz)."""
     drive = np.asarray(b_drive_lab, dtype=float)
     if not np.all(np.isfinite(drive)):
         raise ValueError("b_drive_lab must be a finite lab-frame field "
                          "vector (Bx, By, Bz) in tesla")
     eg, vg, ee, ve = solve(params, b_lab, strain_scale)
+    _require_split(eg, 0, "qubit (lowest ground)", "Rabi rate")
     bs = lab_to_spin(b_drive_lab, params.theta_rad, params.phi_rad)
     if full_zeeman:
         h_mw = h_manifold(0.0, 0.0, 0.0, params.f_g, params.delta_g, bs)

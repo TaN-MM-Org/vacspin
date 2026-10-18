@@ -49,12 +49,14 @@ derivation no longer applies.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 
 from .params import EmissionBudget
 
 __all__ = ["purcell_max", "lorentzian_suppression", "xi_pol_overlap",
-           "CavityInterface"]
+           "CavityInterface", "purcell_from_lifetimes"]
 
 
 def purcell_max(q_loaded, v_rel):
@@ -249,3 +251,121 @@ class CavityInterface:
         if self.f_partner is not None:
             out["f_partner"] = self.f_partner
         return out
+
+
+def _lifetime_input(value, sigma, name):
+    """(value, sigma) of a lifetime given as a number or a LifetimeFit."""
+    from .lab import LifetimeFit
+    if isinstance(value, LifetimeFit):
+        if sigma not in (None, 0, 0.0):
+            raise ValueError(f"{name} is a LifetimeFit, which carries its "
+                             "own error bar; leave its sigma out")
+        return float(value.tau_s), float(value.sigma_tau_s)
+    try:
+        v = float(value)
+        e = 0.0 if sigma is None else float(sigma)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a lifetime in seconds or a "
+                         "LifetimeFit") from None
+    if not (np.isfinite(v) and v > 0.0):
+        raise ValueError(f"{name} must be a positive, finite lifetime "
+                         "in seconds")
+    if not (np.isfinite(e) and e >= 0.0):
+        raise ValueError(f"the error bar of {name} must be finite and "
+                         ">= 0")
+    return v, e
+
+
+def purcell_from_lifetimes(tau_ref_s, tau_cav_s,
+                           sigma_ref_s: Optional[float] = None,
+                           sigma_cav_s: Optional[float] = None,
+                           budget: Optional[EmissionBudget] = None,
+                           kappa_hz: Optional[float] = None,
+                           sigma_kappa_hz: float = 0.0) -> dict:
+    """The cavity budget measured from two lifetimes (new in 0.8.0).
+
+    The inverse of `CavityInterface` for a lab that has measured the
+    excited-state lifetime of one emitter twice: `tau_ref_s` with the
+    cavity tuned far away (or in bulk) and `tau_cav_s` with the cavity
+    on resonance with the coupled line. In the budget of
+    `CavityInterface` the lifetime shortens by zeta = 1 + C, so
+
+        zeta = tau_ref / tau_cav,     C = zeta - 1 (cooperativity),
+        beta = C / (1 + C) = 1 - tau_cav / tau_ref (photons into the mode),
+        F_C = 1 + C / a (Purcell factor of the coupled line; needs the
+            radiative fraction a = eta_q eta_DW eta_BR of `budget`),
+        g = (1/2) sqrt(C kappa / (2 pi tau_ref)) (coupling rate in Hz;
+            needs the cavity linewidth `kappa_hz`, f_cav / Q_L in Hz).
+
+    zeta, C and beta need nothing but the two lifetimes. Each lifetime
+    is a number in seconds with an optional 1-sigma error bar, or a
+    `LifetimeFit` from `fit_lifetime_histogram` (which carries its own).
+    The error bars are independent and are carried through by
+    first-order propagation J cov J^T, with the exact derivatives of the
+    formulas above.
+
+    Returns dict(values, sigma, cov, names): `values` and `sigma` map
+    each name ("zeta", "cooperativity", "beta", then "f_c" with a
+    budget and "g_hz" with kappa_hz) to its value and error bar, and
+    `cov` is their covariance matrix in the order of `names`.
+
+    Refuses (ValueError): lifetimes that are not positive and finite,
+    negative or non-finite error bars, a cavity lifetime that is not
+    shorter than the reference (no Purcell enhancement to measure),
+    a cooperativity whose error bar exceeds a quarter of its value
+    (first-order error bars are then not reliable), and a `kappa_hz`
+    that is not positive and finite.
+    """
+    t_r, s_r = _lifetime_input(tau_ref_s, sigma_ref_s, "tau_ref_s")
+    t_c, s_c = _lifetime_input(tau_cav_s, sigma_cav_s, "tau_cav_s")
+    if budget is not None and not isinstance(budget, EmissionBudget):
+        raise ValueError("budget must be an EmissionBudget")
+    if not t_c < t_r:
+        raise ValueError(
+            f"the cavity lifetime ({t_c:.4g} s) is not shorter than the "
+            f"reference lifetime ({t_r:.4g} s): no Purcell enhancement "
+            "to measure")
+    zeta = t_r / t_c
+    c = zeta - 1.0
+    # derivatives with respect to (tau_ref, tau_cav, kappa)
+    names = ["zeta", "cooperativity", "beta"]
+    vals = [zeta, c, c / zeta]
+    rows = [[1.0 / t_c, -t_r / t_c ** 2, 0.0],
+            [1.0 / t_c, -t_r / t_c ** 2, 0.0],
+            [t_c / t_r ** 2, -1.0 / t_r, 0.0]]
+    if budget is not None:
+        a = budget.radiative_fraction
+        names.append("f_c")
+        vals.append(1.0 + c / a)
+        rows.append([1.0 / (a * t_c), -t_r / (a * t_c ** 2), 0.0])
+    s_k = 0.0
+    if kappa_hz is not None:
+        try:
+            kap = float(kappa_hz)
+            s_k = float(sigma_kappa_hz)
+        except (TypeError, ValueError):
+            kap = s_k = float("nan")
+        if not (np.isfinite(kap) and kap > 0.0):
+            raise ValueError("kappa_hz must be a positive, finite cavity "
+                             "linewidth in Hz")
+        if not (np.isfinite(s_k) and s_k >= 0.0):
+            raise ValueError("sigma_kappa_hz must be finite and >= 0")
+        g = 0.5 * np.sqrt(c * kap / (2.0 * np.pi * t_r))
+        names.append("g_hz")
+        vals.append(float(g))
+        # d ln g = (d ln C + d ln kappa - d ln tau_ref) / 2
+        rows.append([g * (0.5 / (c * t_c) - 0.5 / t_r),
+                     -g * 0.5 * t_r / (c * t_c ** 2),
+                     g * 0.5 / kap])
+    jac = np.array(rows)
+    cov = jac @ np.diag([s_r ** 2, s_c ** 2, s_k ** 2]) @ jac.T
+    sig = np.sqrt(np.maximum(np.diag(cov), 0.0))
+    if sig[1] > 0.25 * c:
+        raise ValueError(
+            f"the cooperativity {c:.4g} +/- {sig[1]:.2g} is not determined "
+            "to better than a quarter of its value, where first-order "
+            "error bars are not reliable; measure the lifetimes more "
+            "precisely")
+    return {"values": dict(zip(names, (float(v) for v in vals))),
+            "sigma": dict(zip(names, (float(v) for v in sig))),
+            "cov": cov, "names": tuple(names)}

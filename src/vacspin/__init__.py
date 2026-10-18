@@ -23,18 +23,19 @@ from .hamiltonian import (GAMMA_GHZ_PER_T, h_manifold, lab_to_spin,
 from .transitions import (cyclicity, field_on_circle, rabi_rate,
                           transition_strength, transition_table)
 from .cavity import (CavityInterface, lorentzian_suppression,
-                     purcell_max, xi_pol_overlap)
+                     purcell_from_lifetimes, purcell_max, xi_pol_overlap)
 from .readout import (fidelity, fidelity_threshold1, geometric_pmf,
                       optimal_window, poisson_pmf, polarization_rate,
                       readout_counts, required_efficiency,
                       required_window)
 from .remote import barrett_kok_success, entanglement_rate
-from .lab import (ReadoutFit, SpinFit, design_fields,
-                  fit_readout_histograms, fit_spin_parameters,
-                  load_observations_csv, parameter_information,
-                  propagate_uncertainty, save_observations_csv)
+from .lab import (LifetimeFit, ReadoutFit, SpinFit, design_fields,
+                  fit_lifetime_histogram, fit_readout_histograms,
+                  fit_spin_parameters, load_observations_csv,
+                  parameter_information, propagate_uncertainty,
+                  save_observations_csv)
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",
@@ -44,7 +45,7 @@ __all__ = [
     "transition_strength", "transition_table", "cyclicity", "rabi_rate",
     "field_on_circle",
     "purcell_max", "lorentzian_suppression", "xi_pol_overlap",
-    "CavityInterface",
+    "CavityInterface", "purcell_from_lifetimes",
     "polarization_rate", "readout_counts", "fidelity_threshold1",
     "geometric_pmf", "poisson_pmf", "fidelity", "required_efficiency",
     "required_window", "optimal_window",
@@ -52,5 +53,6 @@ __all__ = [
     "SpinFit", "fit_spin_parameters", "parameter_information",
     "design_fields", "propagate_uncertainty", "save_observations_csv",
     "load_observations_csv", "ReadoutFit", "fit_readout_histograms",
+    "LifetimeFit", "fit_lifetime_histogram",
     "__version__",
 ]
