@@ -2,7 +2,10 @@
 and the README say they print, and reach the right answers: the
 calibrated values lie within 3 error bars of the simulated truth, the
 best window equals its closed form, and the predicted fidelity agrees
-with the fidelity of the simulated center within its error bar."""
+with the fidelity of the simulated center within its error bar. The
+lifetime tutorial (0.8.0) lands within 3 error bars of the simulated
+lifetimes, of the design's Purcell factor and coupling rate, and of the
+fidelity of the simulated lifetimes."""
 import os
 import pathlib
 import re
@@ -13,9 +16,11 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
-TUTORIALS = ("tutorial_readout_window.py", "tutorial_spin_to_readout.py")
+TUTORIALS = ("tutorial_readout_window.py", "tutorial_spin_to_readout.py",
+             "tutorial_lifetime_to_readout.py")
 
-# the source distribution ships the tests but not examples/
+# since 0.8.0 the source distribution also ships examples/; this guard
+# remains for installs that copy the tests alone
 pytestmark = pytest.mark.skipif(
     not all((EXAMPLES / name).exists() for name in TUTORIALS),
     reason="examples/ is not present (run from a repository clone)")
@@ -90,3 +95,30 @@ def test_spin_tutorial_reaches_the_truth():
     (f_true,) = _num(r"simulated center: fidelity ([\d.]+)", out)
     assert abs(f - f_true) < 3.0 * df
     assert f > 0.99
+
+
+def test_lifetime_tutorial_reaches_the_truth():
+    out = _run("tutorial_lifetime_to_readout.py")
+    for label in ("detuned", "on resonance"):
+        val, err, true, p = _num(
+            label + r":\s+([\d.]+) \+/- ([\d.]+) ns \(simulated "
+            r"([\d.]+)\), p = ([\d.]+)", out)
+        assert abs(val - true) < 3.0 * err
+        assert p > 0.01
+    f_c, df_c, f_design = _num(r"F_C = ([\d.]+) \+/- ([\d.]+) \(design "
+                               r"([\d.]+)\)", out)
+    assert abs(f_c - f_design) < 3.0 * df_c
+    g, dg, g_design = _num(r"g = ([\d.]+) \+/- ([\d.]+) GHz \(design "
+                           r"([\d.]+)\)", out)
+    assert abs(g - g_design) < 3.0 * dg
+    f, df, e_b, e_d = _num(r"fidelity ([\d.]+) \+/- ([\d.]+): bright "
+                           r"error ([\d.]+), dark error ([\d.]+)", out)
+    (f_true,) = _num(r"simulated lifetimes: fidelity ([\d.]+)", out)
+    assert abs(f - f_true) < 3.0 * df
+    # the fidelity is the mean of the two success probabilities
+    assert abs(f - (1.0 - 0.5 * (e_b + e_d))) < 2e-5
+    f1, e_b1, e_d1 = _num(r"threshold 1 instead: fidelity ([\d.]+), "
+                          r"bright error ([\d.]+), dark error ([\d.]+)",
+                          out)
+    assert abs(f1 - (1.0 - 0.5 * (e_b1 + e_d1))) < 2e-5
+    assert f1 < f and e_b1 < e_b and e_d1 > e_d
