@@ -21,10 +21,13 @@ from .params import (EmissionBudget, SpinParameters, gev_bhaskar2017,
 from .hamiltonian import (GAMMA_GHZ_PER_T, h_manifold, lab_to_spin,
                           qubit_frequency, qubit_frequency_perpendicular,
                           solve, zero_field_splitting)
-from .transitions import (cyclicity, field_on_circle, rabi_rate,
-                          transition_strength, transition_table)
+from .transitions import (cyclicity, field_from_axis, field_on_circle,
+                          rabi_rate, transition_strength,
+                          transition_table)
 from .cavity import (CavityInterface, lorentzian_suppression,
                      purcell_from_lifetimes, purcell_max, xi_pol_overlap)
+from .fourlevel import (CLine, c_line, fidelity_four_level,
+                        four_level_counts)
 from .readout import (fidelity, fidelity_threshold1, geometric_pmf,
                       optimal_window, poisson_pmf, polarization_rate,
                       readout_counts, required_efficiency,
@@ -36,7 +39,7 @@ from .lab import (LifetimeFit, ReadoutFit, SpinFit, design_fields,
                   parameter_information, propagate_uncertainty,
                   save_observations_csv)
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",
@@ -44,7 +47,7 @@ __all__ = [
     "zero_field_splitting", "qubit_frequency",
     "qubit_frequency_perpendicular",
     "transition_strength", "transition_table", "cyclicity", "rabi_rate",
-    "field_on_circle",
+    "field_on_circle", "field_from_axis",
     "purcell_max", "lorentzian_suppression", "xi_pol_overlap",
     "CavityInterface", "purcell_from_lifetimes",
     "polarization_rate", "readout_counts", "fidelity_threshold1",
@@ -55,5 +58,6 @@ __all__ = [
     "design_fields", "propagate_uncertainty", "save_observations_csv",
     "load_observations_csv", "ReadoutFit", "fit_readout_histograms",
     "LifetimeFit", "fit_lifetime_histogram",
+    "CLine", "c_line", "four_level_counts", "fidelity_four_level",
     "__version__",
 ]

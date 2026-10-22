@@ -406,7 +406,8 @@ def fidelity(eta: float, lam: float, gamma: float, tau: float,
         its own spin-conserving line (B2) leaves it dark and is not
         this channel; the revised source study finds that route
         dominant once the optical line is Purcell-broadened, and this
-        model has no input for it.
+        model has no input for it: use `vacspin.fidelity_four_level`
+        (new in 0.9.0) there.
     noise_rate : background count rate (1/s), present for both spin
         states. f0 : preparation/other infidelity prefactor.
     nt_switch : ignored since 0.4.0 (the switch-on channel is now

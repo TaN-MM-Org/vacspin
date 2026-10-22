@@ -40,11 +40,12 @@ F_max and F_C = 1 + (F_max - 1) xi_pol xi_pos, so the two conventions
 differ by 1 in the Purcell factor (for its F_cav = 81, F_C = 28 there
 and 27.67 here). Its decay rate
 (its Eq. 1) also adds the cavity-enhanced emission of the D line,
-eta_q eta_DW (1 - eta_BR) (F_D - 1); `zeta` and `beta` here leave that
-term out (`f_partner` reports F_D when `delta_partner_hz` is given).
-At the revised design point (Q_L = 870, F_C = 28, F_D = 3.4) zeta is
-smaller by that term, 10.23 instead of 10.50, and so beta is 0.902
-instead of 0.905 (tests/test_revised_study.py).
+eta_q eta_DW (1 - eta_BR) (F_D - 1). By default `zeta` and `beta` here
+leave that term out (`f_partner` reports F_D when `delta_partner_hz` is
+given): at the revised design point (Q_L = 870, F_C = 28, F_D = 3.4)
+zeta is then smaller by that term, 10.23 instead of 10.50, and so beta
+is 0.902 instead of 0.905 (tests/test_revised_study.py). Since 0.9.0,
+``include_d_line=True`` adds the term (tests/test_fourlevel.py).
 
 with V in units of (lam/n)^3 and kappa = f_cav / Q_L. In the g formula
 all three rates are in the same units: g_hz and kappa_hz are in Hz, and
@@ -138,6 +139,17 @@ class CavityInterface:
         cavity-added emission, (F_C - 1), as photons into the mode.
         "transition" reproduces vacspin 0.5.0 and earlier, which used
         F_C for beta, g and the cooperativity.
+    include_d_line : (new in 0.9.0) when True, the partner line given
+        by `delta_partner_hz` is the D line, and its cavity-added
+        emission eta_q eta_DW (1 - eta_BR) (F_partner - 1) is added to
+        `zeta` (and so to `gamma_cav`), to `beta` = (zeta - 1) / zeta
+        and to `eta`, as in Eq. 1 of the revised source study. The same
+        term is added to the spin-flip channel's zeta, so the D-line
+        decay keeps the C line's spin branching and `lambda_cav` stays
+        close to the bare cyclicity in a broad cavity. Needs
+        `delta_partner_hz` (the C-D spacing, about the ground-state
+        splitting) and the default beta_form. `g_hz` and
+        `cooperativity` stay those of the coupled C transition.
 
     Everything is computed in __init__; `validity` holds the regime
     checks and `require_valid()` refuses when any fails.
@@ -153,7 +165,8 @@ class CavityInterface:
     def __init__(self, q_loaded, v_rel, eta_wg, budget: EmissionBudget,
                  lambda0, omega_q_hz, xi_pol, xi_pos=1.0,
                  t_link=1.0, eta_chip=1.0, eta_det=1.0,
-                 delta_partner_hz=None, beta_form: str = "purcell"):
+                 delta_partner_hz=None, beta_form: str = "purcell",
+                 include_d_line: bool = False):
         for name, v in (("eta_wg", eta_wg), ("xi_pol", xi_pol),
                         ("xi_pos", xi_pos), ("t_link", t_link),
                         ("eta_chip", eta_chip), ("eta_det", eta_det)):
@@ -177,7 +190,17 @@ class CavityInterface:
             raise ValueError('beta_form must be "purcell" (the default) '
                              'or "transition" (the form used before '
                              f'0.6.0), not {beta_form!r}')
+        if not isinstance(include_d_line, bool):
+            raise ValueError("include_d_line must be True or False")
+        if include_d_line and delta_partner_hz is None:
+            raise ValueError("include_d_line=True needs delta_partner_hz, "
+                             "the detuning of the D line from the cavity "
+                             "(Hz; about the ground-state splitting)")
+        if include_d_line and beta_form != "purcell":
+            raise ValueError('include_d_line=True works with the default '
+                             'beta_form="purcell" only')
         self.beta_form = beta_form
+        self.include_d_line = include_d_line
         self.q = float(q_loaded)
         self.v = float(v_rel)
         self.budget = budget
@@ -202,8 +225,19 @@ class CavityInterface:
                 "Q_L or lower V")
         lc2 = lorentzian_suppression(omega_q_hz, self.f_cav_hz, self.q)
         self.f_c2 = 1.0 + (self.f_max - 1.0) * xi_pol * xi_pos * lc2
-        self.zeta = 1.0 + a * (self.f_c - 1.0)
-        zeta_flip = 1.0 + a * (self.f_c2 - 1.0)
+        self.f_partner = None
+        if delta_partner_hz is not None:
+            self.f_partner = 1.0 + (self.f_max - 1.0) * xi_pol * xi_pos \
+                * lorentzian_suppression(delta_partner_hz,
+                                         self.f_cav_hz, self.q)
+        # the D line's cavity-added emission (0 unless include_d_line)
+        self.d_term = 0.0
+        if include_d_line:
+            self.d_term = (budget.eta_q * budget.eta_dw
+                           * (1.0 - budget.eta_br)
+                           * max(self.f_partner - 1.0, 0.0))
+        self.zeta = 1.0 + a * (self.f_c - 1.0) + self.d_term
+        zeta_flip = 1.0 + a * (self.f_c2 - 1.0) + self.d_term
         self.gamma_cav = budget.gamma0 * self.zeta        # 1/s
         self.tau_cav_s = 1.0 / self.gamma_cav
         self.lambda_cav = float(lambda0) * self.zeta / zeta_flip
@@ -212,7 +246,7 @@ class CavityInterface:
         # of -1e-16)
         f_mode = (max(self.f_c - 1.0, 0.0) if beta_form == "purcell"
                   else self.f_c)
-        self.beta = a * f_mode / self.zeta
+        self.beta = (a * f_mode + self.d_term) / self.zeta
         self.eta_wg = float(eta_wg)
         self.eta = (self.beta * self.eta_wg * float(t_link)
                     * float(eta_chip) * float(eta_det))
@@ -232,11 +266,7 @@ class CavityInterface:
             bad_cavity=bool(gamma_cav_hz < self.kappa_hz / 10.0),
             weak_coupling=bool(self.g_hz < self.kappa_hz / 10.0),
         )
-        self.f_partner = None
         if delta_partner_hz is not None:
-            self.f_partner = 1.0 + (self.f_max - 1.0) * xi_pol * xi_pos \
-                * lorentzian_suppression(delta_partner_hz,
-                                         self.f_cav_hz, self.q)
             self.validity["partner_selectivity"] = \
                 bool(self.kappa_hz < float(delta_partner_hz))
 
@@ -263,6 +293,8 @@ class CavityInterface:
                    validity=dict(self.validity))
         if self.f_partner is not None:
             out["f_partner"] = self.f_partner
+        if self.include_d_line:
+            out["d_term"] = self.d_term
         return out
 
 

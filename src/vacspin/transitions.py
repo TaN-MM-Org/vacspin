@@ -28,7 +28,7 @@ from .hamiltonian import GAMMA_GHZ_PER_T, h_manifold, lab_to_spin, solve
 from .params import SpinParameters
 
 __all__ = ["transition_strength", "transition_table", "cyclicity",
-           "rabi_rate", "field_on_circle"]
+           "rabi_rate", "field_on_circle", "field_from_axis"]
 
 _I2 = np.eye(2)
 _PX = np.kron(np.array([[1.0, 0.0], [0.0, -1.0]]), _I2)
@@ -65,6 +65,29 @@ def transition_strength(ket_g, ket_e):
     """|<e|p|g>|^2 summed over the three dipole components."""
     return float(sum(abs(np.vdot(ket_e, p @ ket_g)) ** 2
                      for p in (_PX, _PY, _PZ)))
+
+
+def field_from_axis(params: SpinParameters, b_mag_t: float,
+                    misalign_deg: float, azimuth_deg: float = 0.0):
+    """Lab-frame field of magnitude b_mag_t (tesla) at misalign_deg from
+    the center's symmetry axis (new in 0.9.0).
+
+    The direction is set in the spin frame of `lab_to_spin` (z along the
+    axis at polar angle params.theta_rad, azimuth params.phi_rad; x is
+    the strain axis): (sin m cos a, sin m sin a, cos m) with m =
+    misalign_deg and a = azimuth_deg, then rotated to the lab frame. The
+    source study's misalignment plane (towards axis x lab z) is
+    azimuth_deg = 270."""
+    vals = (float(b_mag_t), float(misalign_deg), float(azimuth_deg))
+    if not all(np.isfinite(v) for v in vals) or vals[0] < 0.0:
+        raise ValueError("b_mag_t must be finite and >= 0, and the angles "
+                         "finite")
+    m, a = np.deg2rad(vals[1]), np.deg2rad(vals[2])
+    v_spin = np.array([np.sin(m) * np.cos(a), np.sin(m) * np.sin(a),
+                       np.cos(m)])
+    rot = np.vstack([lab_to_spin(e, params.theta_rad, params.phi_rad)
+                     for e in np.eye(3)]).T      # lab -> spin, as a matrix
+    return vals[0] * (rot.T @ v_spin)
 
 
 def field_on_circle(zeta_deg, b_mag_t, plane="xz"):
