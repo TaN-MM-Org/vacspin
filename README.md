@@ -36,6 +36,9 @@ optics around it, the package answers questions such as:
   resonance, what are the Purcell factor, cooperativity and coupling
   rate of your cavity, with error bars? And how often does each spin
   state give the wrong answer at the threshold your counter uses?
+- In a broad cavity, where the dark spin also scatters the readout
+  laser through its own transition, what is the readout fidelity? (A
+  four-level model, new in 0.9.0.)
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -162,7 +165,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.8.1 (the same as with 0.6.0 to 0.8.0). The cavity, detector, attempt-rate and
+printed with vacspin 0.9.0 (examples 1 to 7 print the same as with 0.6.0 to 0.8.1). The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -610,6 +613,76 @@ What the fit can and cannot tell:
   The test suite shows that 20 % failed preparations among 5000 shots
   give a p-value below 10^-6.
 
+### 8. Four-level readout in a broad cavity (new in 0.9.0)
+
+In a cavity the optical line is broadened, and the dark spin is then
+excited mostly through its own spin-conserving line B2, only a few
+hundred megahertz to a few gigahertz from the laser. Those photons are
+counted, but the spin stays dark; it switches on only through a rare
+spin-flipping decay. The two-state model of examples 2 and 3 has no
+input for this. `fidelity_four_level` computes the readout exactly
+from the four-level master equation of the source study, with every
+line taken from the spin Hamiltonian at the actual field. This example
+runs the study's design point (`Q_L = 870`, `F_C = 28`, the D line
+counted in the decay rate with `include_d_line=True`).
+
+```python
+import math
+import vacspin as vs
+
+spin = vs.snv_rosenthal2023()
+# 111.8 mT, 9 degrees from the spin axis (the source study's operating point)
+b = vs.field_from_axis(spin, 0.1118, 9.0, azimuth_deg=270.0)
+line = vs.c_line(spin, b)
+print(f"qubit {line.w_q_ghz:.3f} GHz, A1-B2 detuning {line.detuning_b2_ghz:.3f} GHz, "
+      f"cyclicity {line.lam_a:.0f}")
+
+ci = vs.CavityInterface(
+    q_loaded=870, v_rel=vs.purcell_max(870, 1.0) / 82,   # F_max = 82, so F_C = 28
+    eta_wg=0.92, budget=vs.snv_emission(), lambda0=line.lam_a,
+    omega_q_hz=line.w_q_ghz * 1e9,
+    xi_pol=vs.xi_pol_overlap(), xi_pos=0.5,
+    t_link=0.997, eta_chip=0.5, eta_det=0.77,
+    delta_partner_hz=line.delta_g_ghz * 1e9,          # the D line, one ground splitting away
+    include_d_line=True).require_valid()
+print(f"F_C {ci.f_c:.1f}, F_D {ci.f_partner:.2f}, decay {ci.zeta:.2f} times faster, "
+      f"eta {ci.eta:.4f}")
+
+out = vs.fidelity_four_level(line, ci.gamma_cav, ci.eta, tau=100e-9, s=1.0, f0=0.99)
+print(f"four-level, 100 ns: fidelity {out['fidelity']:.4f} (threshold {out['threshold']}), "
+      f"mean counts bright {out['n_bright']:.2f}, dark {out['n_dark']:.2f}")
+
+# The two-state model cannot hold the B2 light: fed in as `leak`, every
+# such excitation switches the dark spin on, and the fidelity collapses.
+d = 2 * math.pi * line.detuning_b2_ghz * 1e9
+leak = (1 + 1.0) / (1 + 1.0 + (2 * d / ci.gamma_cav) ** 2)
+two = vs.fidelity(ci.eta, ci.lambda_cav, ci.gamma_cav, 100e-9, s=1.0, leak=leak, f0=0.99)
+print(f"two-state with B2 as leak: fidelity {two['fidelity']:.4f}")
+```
+
+```
+qubit 3.677 GHz, A1-B2 detuning 0.727 GHz, cyclicity 2180
+F_C 28.0, F_D 3.34, decay 10.50 times faster, eta 0.3195
+four-level, 100 ns: fidelity 0.9882 (threshold 8), mean counts bright 18.31, dark 2.18
+two-state with B2 as leak: fidelity 0.5327
+```
+
+The four-level result is the study's 98.8 % in 100 ns. For the same
+inputs it matches the study's own code to 1e-10
+(`tests/test_fourlevel.py`). `c_line` gives the four C-line transitions
+at a field: their strengths, the qubit frequency `w_q_ghz`, the
+excited splitting `w_e_ghz` (B2 lies `w_e - w_q` above A1), the two
+cyclicities `lam_a` and `lam_b`, and the ground-state splitting
+`delta_g_ghz` (the C-D spacing). `field_from_axis` builds a field at a
+given angle from the spin axis; azimuth 270 degrees is the study's
+misalignment plane. `four_level_counts` returns the two count
+distributions themselves. Extra homogeneous broadening
+(`extra_width_hz`), quasi-static spectral diffusion
+(`spectral_diffusion_hz`), a laser detuning and Poisson background
+(`noise_rate`) are inputs. The last line shows why the two-state model
+must not be fed the B2 light: as `leak`, every excitation switches the
+dark spin on, and the fidelity falls to about one half.
+
 ## Tutorials
 
 Three scripts in the `examples/` folder of the repository (and, since
@@ -806,6 +879,8 @@ gives its inputs, units and conventions.
   `full_zeeman=True` adds the orbital and anisotropy Zeeman terms to
   the drive. Since 0.8.0 it refuses a static field too weak to split
   the qubit pair.
+- `field_from_axis` (new in 0.9.0) -- a field of given size at a given
+  angle from the center's symmetry axis and azimuth around it.
 - `field_on_circle` -- a field of given size at an angle in one lab
   plane.
 
@@ -824,8 +899,12 @@ arXiv:2511.05740)
   `cooperativity`, the `validity` checks, `require_valid()` and
   `summary()`. An optional `delta_partner_hz` adds the Purcell factor
   of a competing same-spin line and a check that the cavity is
-  narrower than their spacing. `beta_form="transition"` gives the
-  `beta`, `g` and cooperativity of version 0.5.0 and earlier.
+  narrower than their spacing. With `include_d_line=True` (new in
+  0.9.0) that line is the D line, and its cavity-added emission
+  `eta_q eta_DW (1 - eta_BR) (F_D - 1)` (`d_term`) is added to `zeta`,
+  `gamma_cav`, `beta` and `eta`, as in the source study's Eq. 1.
+  `beta_form="transition"` gives the `beta`, `g` and cooperativity of
+  version 0.5.0 and earlier.
 - `purcell_from_lifetimes` (new in 0.8.0): the same budget measured
   instead of designed: from the lifetime with the cavity tuned away and
   the lifetime on resonance (numbers with error bars, or two
@@ -868,6 +947,21 @@ Appendix A)
   counts) takes a few seconds.
 - `poisson_pmf`, `geometric_pmf` -- the two limiting count
   distributions (no spin flips; flips always end the record).
+
+**Four-level readout** (`vacspin.fourlevel`, new in 0.9.0; the
+four-level model of the revised source study)
+
+- `c_line(params, b_lab)` and `CLine` -- the four C-line transitions
+  (A1, B2 spin-conserving; A2, B1 spin-flipping) at a field and strain:
+  `strengths` (2 x 2), `w_q_ghz`, `w_e_ghz`, `detuning_b2_ghz`,
+  `lam_a`, `lam_b`, `delta_g_ghz`.
+- `four_level_counts` -- the exact detected-count distributions of the
+  bright and the dark spin, from the four-level master equation by
+  full counting statistics, with optional extra homogeneous width,
+  quasi-static spectral diffusion, laser detuning and background.
+- `fidelity_four_level` -- the fidelity at the best (or a given)
+  threshold from those distributions, with `n_bright`, `n_dark`,
+  `error_bright`, `error_dark`, and the preparation factor `f0`.
 
 **Remote entanglement** (`vacspin.remote`; Barrett and Kok, PRA 71,
 060310(R) (2005))
@@ -1015,10 +1109,27 @@ Appendix A)
   that is not positive and finite, or a cooperativity whose error bar
   is more than a quarter of its value (first-order error bars are then
   not reliable).
+- in `CavityInterface` (since 0.9.0): `include_d_line` that is not
+  True or False, or True without `delta_partner_hz` or with
+  `beta_form="transition"`;
+- in `c_line` (since 0.9.0): a field that does not split the qubit
+  doublet or the lower excited doublet, or a C line with no strength
+  into one of the excited states;
+- in `four_level_counts` and `fidelity_four_level` (since 0.9.0): an
+  input that is not a `CLine`, `gamma`, `tau` or `s` not positive and
+  finite, `eta` outside [0, 1], a background, extra width or spectral
+  diffusion that is negative or not finite, a laser detuning that is
+  not finite, `f0` outside (0, 1], a `threshold` that is not a whole
+  number of at least 1, count distributions that could need more than
+  2^16 = 65536 counts, distributions that do not sum to 1 within 1e-8
+  (round-off out of control), or a spectral-diffusion average that has
+  not converged on 1025 points;
+- in `field_from_axis` (since 0.9.0): a negative or non-finite field
+  size, or a non-finite angle.
 
 ## How the results are checked
 
-147 automated tests run on every push and pull request, on Python 3.9,
+177 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -1231,12 +1342,55 @@ in the test)
   about 100 times the confocal 0.1 to 0.4 %. The paper's decay rate
   (its Eq. 1), evaluated in the test, also adds the cavity-enhanced
   emission of the D line: it gives the paper's 10.5 times faster decay
-  (0.43 ns) and `beta = 91 %`. vacspin leaves that term out, so its
-  `zeta` (10.23) is smaller by exactly that term, and its `beta`
-  (0.902) is lower as a result (see [Limits](#limits)).
+  (0.43 ns) and `beta = 91 %`. By default vacspin leaves that term
+  out, so its `zeta` (10.23) is smaller by exactly that term, and its
+  `beta` (0.902) is lower as a result; `include_d_line=True` (since
+  0.9.0) adds it (below).
 - The revised study's readout fidelity (98.8 % in 0.1 us) comes from
-  its four-level model and is not reproduced here (see
-  [Limits](#limits)).
+  its four-level model, which vacspin has since 0.9.0 (below).
+
+**Four-level readout and the D line** (since 0.9.0;
+`tests/test_fourlevel.py`)
+
+- Against closed forms: for a resonantly driven two-level emitter the
+  mean bright count is `eta gamma` times the integral of Torrey's
+  excited population (to 1e-8, at s = 0.3, 1 and 4, and at the
+  critically damped s = 1/8, where the eigenvector route is
+  ill-conditioned and the Taylor route takes over); a dark spin
+  driven 0.73 GHz off resonance emits at the Lorentzian rate
+  `(gamma/2) s / (1 + s + (2 Delta / gamma)^2)` (to 1e-3, the start-up
+  transient); a dark spin with no light gives the Poisson background
+  alone (to 1e-12).
+- Against a second algorithm: the photon-number-resolved master
+  equation, written separately in the test and integrated in time
+  (RK4), gives the same count distributions at the study's design
+  point to 1e-7.
+- Against the two-state model: with a dark spin that scatters almost
+  nothing, the bright mean agrees within 0.2 % at 1 us and 0.1 % at
+  3 us (a driven emitter emits more regularly than a Poisson process),
+  and both reach `eta (Lambda + 1)` once the spin has surely flipped
+  (to 1e-4).
+- Against the study's own code (commit c83302e, its separate
+  Hamiltonian and its own counting statistics): the C line at the
+  reference field (qubit 3.677 GHz, A1-B2 detuning 0.72713 GHz,
+  cyclicities 2179.68 and 2132.06, to 1e-9); the readout at 100 ns,
+  0.98823431 (to 1e-10), and at the study's best window of 508 ns,
+  0.99012995 (to 1e-10); extra width and background (to 1e-9), and
+  two cases with spectral diffusion (to 1e-5: the study code averages
+  over 9 Gauss-Hermite points).
+- The spectral-diffusion average against a dense average over 241
+  fixed laser detunings done in the test: to 2e-7 at 1 GHz FWHM, where
+  a 9-point Gauss-Hermite rule is off by more than 1e-4.
+- Against the paper: 98.8 % in 100 ns and 99.0 % at 508 ns; the
+  confocal check of the source experiment (eta = 0.2 %, 50 us,
+  0.2 background counts): 83.3 %, 3.8 bright and 0.22 dark counts, and
+  89.8 % at eta = 0.4 %; the whole chain, spin model to cavity (with
+  the D line) to readout, gives 0.98823.
+- The D-line term equals the study's Eq. 1 (to 1e-14), and the study
+  code's `zeta = 10.500891`, `beta = 0.904770` and `eta = 0.319508`
+  within 2e-5 (the two codes take the cavity frequency at 619.0 and
+  618.9 nm). Without `include_d_line` every budget number equals what
+  the released 0.8.1 printed for eight stored cases, exactly.
 
 **Your own sample** (`vacspin.lab`)
 
@@ -1508,22 +1662,33 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   with `leak > 0` its bright mean exceeds `fidelity`'s
   `n_bright_total` by exactly `eta leak R tau` (example 3 with
   `leak = 0.01`: 4.3176 against 4.2166). With `leak = 0` they agree.
-- **The D line's cavity-enhanced emission is not in the budget.**
-  `CavityInterface` reports the D line's Purcell factor (`f_partner`,
-  when you give `delta_partner_hz`), but `zeta`, `beta` and `eta`
-  count only the coupled line. In a very broad cavity the D line is
-  enhanced too. At the revised study's design point (D line 0.90 THz
-  from a 0.56 THz wide cavity, `F_D = 3.4`) this leaves the decay 10.23
-  times faster instead of 10.50, and `beta` at 0.902 instead of 0.905.
-- **No input for light the dark spin scatters through its own line
-  (B2).** `leak` is excitation that switches the dark spin on, as
-  excitation through the spin-flipping line A2 does. Once the optical
-  line is Purcell-broadened, the revised study finds that most of the
-  dark spin's light comes instead through B2, only 0.73 GHz from the
-  laser, which leaves the spin dark. This model cannot describe that, so it does not reproduce
-  the revised study's four-level readout (98.8 % in 0.1 us). Do not
-  put the B2 excitation into `leak`: every such excitation would then
-  switch the spin on, and the fidelity would come out far too low.
+- **The D line counts only with `include_d_line=True`.** By default
+  `zeta`, `beta` and `eta` count only the coupled line, as before 0.9.0.
+  In a very broad cavity the D line is enhanced too: at the revised
+  study's design point (D line 0.90 THz from a 0.56 THz wide cavity,
+  `F_D = 3.4`) the default leaves the decay 10.23 times faster instead
+  of 10.50, and `beta` at 0.902 instead of 0.905.
+- **The two-state model has no input for light the dark spin scatters
+  through its own line (B2).** `leak` in `fidelity` is excitation that
+  switches the dark spin on, as excitation through the spin-flipping
+  line A2 does. Once the optical line is Purcell-broadened, most of the
+  dark spin's light comes instead through B2, which leaves the spin
+  dark. Use `fidelity_four_level` there. Do not put the B2 excitation
+  into `leak`: every such excitation would then switch the spin on,
+  and the fidelity comes out far too low (example 8).
+- **The four-level model assumes a broad cavity.** All four C-line
+  transitions get the same total decay rate `gamma`, which needs a
+  cavity linewidth far above the C-line splittings (a few GHz). The
+  laser couples to each line with a real, positive Rabi frequency
+  scaled by its polarization-summed strength (no dipole phases or
+  per-line polarization), as in the source study. It leaves out
+  ground-state spin relaxation (T1) and charge-state jumps, and it
+  always calls the spin prepared in `|dn>` bright. Its cost grows with
+  the counts: a window that could hold more than 65536 counts is
+  refused, and a 100 ns window at the study's design point takes about
+  0.1 s. Spectral diffusion multiplies the cost by the number of grid
+  points it needs: about 1.5 s at 0.1 GHz and 25 s at 2 GHz FWHM for
+  that window.
 - **The measured cyclicity near alignment depends on alignment.** At
   the nominal angles the model gives a much lower cyclicity than the
   measured 2244; see example 1.
@@ -1583,10 +1748,14 @@ design (FEM/EME/GME electromagnetic simulations) and reproduces the specific stu
 
 The revised manuscript moved the design point to an overcoupled cavity
 with `Q_L = 870` (`F_C = 28`, 32 % of photons detected) and reads the
-spin with a four-level model. `tests/test_revised_study.py` checks
-this package against its printed numbers. `tests/test_integration.py`
-keeps the `Q_L = 500` design point of the original submission as a
-regression test of the whole chain.
+spin with a four-level model. Since 0.9.0 vacspin includes that model
+(`fidelity_four_level`) and the study's D-line term
+(`include_d_line`), and reproduces the study's 98.8 % in 100 ns
+(`tests/test_fourlevel.py`, example 8). `tests/test_revised_study.py`
+checks the spin model and the cavity budget against the printed
+numbers. `tests/test_integration.py` keeps the `Q_L = 500` design
+point of the original submission as a regression test of the whole
+chain.
 
 Formalism: Rosenthal et al., PRX 13, 031022 (2023) and PRX 14,
 041008 (2024) (arXiv:2403.13110); decay-rate budget of the coupled

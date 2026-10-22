@@ -4,6 +4,75 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.9.0 (2026-10-22)
+
+The four-level readout of the revised source study, and its D-line
+term in the cavity budget. With both, the package reproduces the
+study's 98.8 % single-shot fidelity in 100 ns. Every result of 0.8.1
+is unchanged.
+
+### Added
+
+- `vacspin.fourlevel` (exported at top level): `c_line(params, b_lab)`
+  and `CLine` give the four C-line transitions (A1, B2, A2, B1) at a
+  field and strain: dipole strengths, qubit frequency, excited
+  splitting, the A1-B2 detuning, both cyclicities and the C-D spacing.
+  `four_level_counts` gives the exact detected-count distributions of
+  the bright and the dark spin from the four-level master equation of
+  the study (full counting statistics: the generating function on the
+  unit circle, inverted by a discrete Fourier transform; the count
+  range is set by a Chernoff bound so that wrap-around stays below
+  1e-12). It includes the dark spin's own line B2, which gives counts
+  without switching the spin on, every spin flip, and optional extra
+  homogeneous width, quasi-static spectral diffusion (averaged before
+  the threshold on a grid refined until no probability changes by more
+  than 1e-7), laser detuning and background.
+  `fidelity_four_level` gives the fidelity at the best or a given
+  threshold, with both error probabilities and a preparation factor.
+  Tests (tests/test_fourlevel.py): the mean bright count equals the
+  integral of Torrey's closed-form excited population (to 1e-8, three
+  drive strengths and the critically damped s = 1/8); the
+  spectral-diffusion average equals a dense average over 241 laser
+  detunings (to 2e-7 at 1 GHz FWHM, where 9 Gauss-Hermite points are
+  off by more than 1e-4); a detuned dark spin emits at the Lorentzian rate
+  (to 1e-3); a dark spin without light gives the Poisson background
+  (to 1e-12); a time integration of the photon-number-resolved master
+  equation, written separately in the test, gives the same
+  distributions (to 1e-7); the two-state model agrees where it applies
+  (0.2 % at 1 us, 0.1 % at 3 us, 1e-4 once the spin has flipped); the
+  study's own code (commit c83302e, with its separate Hamiltonian)
+  gives the same C line (to 1e-9) and fidelities (0.98823431 at
+  100 ns and 0.99012995 at 508 ns, to 1e-10; extra width and
+  background to 1e-9; spectral diffusion to 1e-5, the difference of the
+  study code's 9-point Gauss-Hermite average); and the paper's printed
+  results: 98.8 % in 100 ns, 99.0 % at 508 ns, and its confocal check
+  (83.3 % with 3.8 bright and 0.22 dark counts at eta = 0.2 %, 89.8 %
+  at 0.4 %).
+- `CavityInterface(..., include_d_line=True)`: the partner line of
+  `delta_partner_hz` is the D line, and its cavity-added emission
+  `eta_q eta_DW (1 - eta_BR) (F_D - 1)` (`d_term`, also in `summary()`)
+  enters `zeta`, `gamma_cav`, `beta = (zeta - 1) / zeta` and `eta`, as
+  in the study's Eq. 1. The same term enters the spin-flip channel, so
+  the broad cavity keeps the bare cyclicity. Tests: Eq. 1 to 1e-14;
+  the study code's `zeta = 10.500891`, `beta = 0.904770`,
+  `eta = 0.319508` within 2e-5; with the default (False) every budget
+  number equals what the released 0.8.1 printed for eight stored cases,
+  exactly (a comparison of 564 random designs, run once outside the
+  test suite, also found every number equal).
+- `field_from_axis(params, b_mag_t, misalign_deg, azimuth_deg=0.0)`: a
+  field at a given angle from the center's symmetry axis; azimuth 270
+  degrees is the study's misalignment plane.
+- README example 8: the study's design point from the spin model to
+  the four-level readout (0.9882 in 100 ns), and why the two-state
+  model must not be fed the B2 light (0.5327).
+
+### Changed
+
+- README: "Limits" now says when to use the four-level model and the
+  D-line term instead of naming them as missing; "How the results are
+  checked" lists the new checks; the test count is updated (0.8.1
+  still said 147; there are now 177).
+
 ## 0.8.1 (2026-10-22)
 
 The source study was revised. This release cites the revised
