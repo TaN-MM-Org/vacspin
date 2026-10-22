@@ -20,10 +20,13 @@ revised paper prints, and pins down where the two differ:
 * the cavity budget: F_C = 28, D-line Purcell factor 3.4, coupling
   6.8 GHz (vacspin: 6.74) with g / kappa = 0.012, the bare cyclicity
   kept by the broad cavity, and a detected-photon efficiency of 32 %;
-* the one term vacspin leaves out: the paper's decay rate (its Eq. 1)
-  also counts the cavity-enhanced emission of the D line. With it the
-  rate rises 10.5 times (lifetime 0.43 ns, beta = 91 %); vacspin's
-  `zeta` is smaller by exactly eta_q eta_DW (1 - eta_BR) (F_D - 1).
+* the one term vacspin leaves out by default: the paper's decay rate
+  (its Eq. 1) also counts the cavity-enhanced emission of the D line.
+  With it the rate rises 10.5 times (lifetime 0.43 ns, beta = 91 %);
+  vacspin's default `zeta` is smaller by exactly
+  eta_q eta_DW (1 - eta_BR) (F_D - 1). Since 0.9.0,
+  `include_d_line=True` adds that term and the four-level readout of
+  the study is in `vacspin.fourlevel` (tests/test_fourlevel.py).
 
 Every paper value is quoted from the revised manuscript as printed;
 each assertion states its tolerance.
