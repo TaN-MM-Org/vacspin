@@ -5,11 +5,26 @@ authors:
   - family-names: Mahim
     given-names: Tanvir M.
     orcid: "https://orcid.org/0000-0002-4550-3248"
-version: 0.8.0
-date-released: 2026-10-18
+version: 0.8.1
+date-released: 2026-10-22
 license: Apache-2.0
 repository-code: "https://github.com/TaN-MM-Org/vacspin"
 identifiers:
   - type: doi
     value: 10.5281/zenodo.22819698
     description: "Concept DOI for all versions; resolves to the latest release"
+references:
+  - type: article
+    title: "Fast single-shot readout of tin-vacancy spins with an overcoupled diamond nanocavity on thin-film lithium niobate"
+    authors:
+      - family-names: Mahim
+        given-names: Tanvir M.
+        orcid: "https://orcid.org/0000-0002-4550-3248"
+      - family-names: Rahman
+        given-names: M. Mosaddequr
+      - family-names: Mohsin
+        given-names: Abu S. M.
+    journal: "Optics Express"
+    year: 2026
+    status: submitted
+    notes: "Revised manuscript under review. Code: https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface; data: doi:10.5281/zenodo.23507013"

@@ -4,6 +4,49 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.8.1 (2026-10-22)
+
+The source study was revised. This release cites the revised
+manuscript and checks the package against it. No code changed; every
+result is the same as in 0.8.0.
+
+### Added
+
+- `tests/test_revised_study.py`: the package against the numbers
+  printed in the revised manuscript (Mahim, Rahman and Mohsin, "Fast
+  single-shot readout of tin-vacancy spins with an overcoupled diamond
+  nanocavity on thin-film lithium niobate", submitted to Optics
+  Express, 2026; data doi:10.5281/zenodo.23507013). At 112 mT, 9
+  degrees from the spin axis, for four azimuths: qubit frequency 3.684
+  GHz (paper: 3.68), excited splitting 4.412 GHz (paper: 4.40), A1-B2
+  detuning 0.7285 GHz (paper: 0.73), cyclicity 2180 (paper: 2180);
+  0.501 GHz detuning at 77 mT (paper: 500 MHz). The Q_L = 870 cavity
+  at the paper's F_C = 28 (the paper's F_C = 1 + F_cav xi_pol xi_pos
+  with F_cav = 81 is F_max = 82 in vacspin's form): F_D = 3.36 (paper:
+  3.4), g = 6.74 GHz (paper: 6.8), g / kappa = 0.0121 (paper: 0.012),
+  the bare cyclicity kept to 0.1 %, and a detected-photon efficiency
+  of 0.319 (paper: 32 %). The paper's Eq. 1, evaluated in the test,
+  gives its 10.5 times faster decay (0.43 ns) and beta = 91 %;
+  vacspin's zeta (10.23) is smaller by exactly the D-line term it
+  leaves out, and its beta (0.902) is lower as a result.
+
+### Changed
+
+- README, CITATION.cff (new `references` entry) and the docstrings of
+  `vacspin`, `vacspin.cavity` and `fidelity` cite the revised
+  manuscript and its data DOI. The Q_L = 500 design point (F_C about
+  19, efficiency about 65 %, fidelity 98.5 %) is now named as that of
+  the study's original submission; `tests/test_integration.py` keeps it
+  as a regression test of the whole chain.
+- README "Limits" names two differences from the revised study: the
+  cavity-enhanced emission of the D line is not added to `zeta`,
+  `beta` and `eta`, and the model has no input for light the dark spin
+  scatters through its own line B2 (a `leak` excitation switches the
+  dark spin on with probability Lambda / (Lambda + 1)), so the revised
+  study's four-level readout fidelity (98.8 % in 0.1 us) is not
+  reproduced. The `leak` docstring of `fidelity`
+  says the same.
+
 ## 0.8.0 (2026-10-18)
 
 Lifetime histograms and the cavity budget they measure, the readout

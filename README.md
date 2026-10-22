@@ -162,7 +162,7 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.8.0 (the same as with 0.6.0 and 0.7.0). The cavity, detector, attempt-rate and
+printed with vacspin 0.8.1 (the same as with 0.6.0 to 0.8.0). The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -265,8 +265,11 @@ cavity; its normal emission (the "1" in `F_C`) still goes where it
 went before, so `beta` uses `F_C - 1`. With no overlap
 (`xi_pos=0`) `beta`, `g` and the cooperativity are exactly 0. Before
 0.6.0 `beta` and `g` used `F_C`, which gave `beta = 0.342` with no
-overlap and `eta = 0.648` here. The companion study reports that
-number (about 65 %); `beta_form="transition"` gives it back.
+overlap and `eta = 0.648` here. The original submission of the
+companion study reported that number (about 65 %);
+`beta_form="transition"` gives it back. The revised study uses another
+design point (`Q_L = 870`, about 32 %), which
+`tests/test_revised_study.py` checks.
 
 `xi_pol` and `xi_pos` say how well the centre's dipole lines up with
 the cavity field in direction and position (each from 0 to 1);
@@ -277,8 +280,8 @@ out-coupling port, the link, the chip and the detector.
 
 This fidelity counts only the bright spin's own statistics: `leak` and
 `noise_rate` are left at zero here, so the dark state never produces a
-click. The test suite runs nearly the same design point (link 0.991,
-out-coupling `1 - 500/1.39e6`) with a computed
+click. The test suite runs nearly the same design point (the original
+submission's: link 0.991, out-coupling `1 - 500/1.39e6`) with a computed
 off-resonant leak and a 1000 counts/s background and asserts a
 fidelity above 98 % at the best of four windows (10 to 50 ns).
 
@@ -1189,19 +1192,51 @@ checks, with the tolerances the tests actually use:
   1e-12 of the largest value; it performs the same operations in the
   same order).
 
-**The source study's design point** (Q = 500 cavity, from the study's
-stated inputs, with the qubit frequency computed by the package)
+**The source study's original design point** (Q = 500 cavity, from
+the stated inputs of the study's original submission, with the qubit
+frequency computed by the package)
 
 - Purcell factor within 5 % of 19, inside the valid regime. With
-  `beta_form="transition"` (the study's form) the detection efficiency
-  is within 5 % of the study's 0.65 (0.6486); the default gives 0.6150,
-  smaller by exactly `(F_C - 1) / F_C`.
-- With a computed off-resonant leak and a 1000 counts/s background:
+  `beta_form="transition"` (that version's form) the detection
+  efficiency is within 5 % of that version's 0.65 (0.6486); the default
+  gives 0.6150, smaller by exactly `(F_C - 1) / F_C`.
+- With the off-resonant leak that version computed (the spin-flipping
+  line A2 at the full strength of A1; it left out the dark spin's own
+  line B2, which the revised study finds dominant) and a 1000 counts/s
+  background:
   fidelity above 98 % at the best of four windows (10, 20, 30,
   50 ns); above 94 % at 100 ns with `f0 = 0.99`; and lower when `eta`
   is halved.
 - The window needed for 85 % fidelity is more than 100 times shorter
   with the cavity than confocally.
+
+**The revised source study** (since 0.8.1; `Q_L = 870`, against the
+numbers printed in the revised manuscript, with each tolerance stated
+in the test)
+
+- At 112 mT, 9 degrees from the spin axis, for four directions around
+  that axis: qubit frequency 3.684 GHz (paper: 3.68), excited-state
+  splitting 4.412 GHz (paper: 4.40), A1-B2 detuning 0.7285 GHz (paper:
+  0.73) and cyclicity 2180 (paper: 2180). At 77 mT the A1-B2 detuning
+  is 0.501 GHz (paper: 500 MHz). The two spin-conserving lines A1 and
+  B2 have the same strength (to 0.1 %).
+- The cavity at the paper's `F_C = 28`. The paper writes
+  `F_C = 1 + F_cav xi_pol xi_pos` with `F_cav = 81`; vacspin writes
+  `F_C = 1 + (F_max - 1) xi_pol xi_pos`, so the test sets
+  `F_max = 82` (with `F_max = 81`, vacspin gives `F_C = 27.67`). Then:
+  D-line Purcell factor 3.36 (paper: 3.4) with the D line 0.90 THz
+  away, coupling 6.74 GHz (paper: 6.8), `g / kappa = 0.0121` (paper:
+  0.012), and the bare cyclicity kept by the broad cavity (to 0.1 %).
+- Detected-photon efficiency 0.319, within 0.005 of the paper's 32 %,
+  about 100 times the confocal 0.1 to 0.4 %. The paper's decay rate
+  (its Eq. 1), evaluated in the test, also adds the cavity-enhanced
+  emission of the D line: it gives the paper's 10.5 times faster decay
+  (0.43 ns) and `beta = 91 %`. vacspin leaves that term out, so its
+  `zeta` (10.23) is smaller by exactly that term, and its `beta`
+  (0.902) is lower as a result (see [Limits](#limits)).
+- The revised study's readout fidelity (98.8 % in 0.1 us) comes from
+  its four-level model and is not reproduced here (see
+  [Limits](#limits)).
 
 **Your own sample** (`vacspin.lab`)
 
@@ -1473,6 +1508,22 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   with `leak > 0` its bright mean exceeds `fidelity`'s
   `n_bright_total` by exactly `eta leak R tau` (example 3 with
   `leak = 0.01`: 4.3176 against 4.2166). With `leak = 0` they agree.
+- **The D line's cavity-enhanced emission is not in the budget.**
+  `CavityInterface` reports the D line's Purcell factor (`f_partner`,
+  when you give `delta_partner_hz`), but `zeta`, `beta` and `eta`
+  count only the coupled line. In a very broad cavity the D line is
+  enhanced too. At the revised study's design point (D line 0.90 THz
+  from a 0.56 THz wide cavity, `F_D = 3.4`) this leaves the decay 10.23
+  times faster instead of 10.50, and `beta` at 0.902 instead of 0.905.
+- **No input for light the dark spin scatters through its own line
+  (B2).** `leak` is excitation that switches the dark spin on, as
+  excitation through the spin-flipping line A2 does. Once the optical
+  line is Purcell-broadened, the revised study finds that most of the
+  dark spin's light comes instead through B2, only 0.73 GHz from the
+  laser, which leaves the spin dark. This model cannot describe that, so it does not reproduce
+  the revised study's four-level readout (98.8 % in 0.1 us). Do not
+  put the B2 excitation into `leak`: every such excitation would then
+  switch the spin on, and the fidelity would come out far too low.
 - **The measured cyclicity near alignment depends on alignment.** At
   the nominal angles the model gives a much lower cyclicity than the
   measured 2244; see example 1.
@@ -1525,8 +1576,17 @@ design (FEM/EME/GME electromagnetic simulations) and reproduces the specific stu
 
 > T. M. Mahim, M. M. Rahman and A. S. M. Mohsin, "Fast single-shot
 > readout of tin-vacancy spins with an overcoupled diamond nanocavity
-> on thin-film lithium niobate" (submitted to Optics Express, 2026);
-> pipeline: https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface
+> on thin-film lithium niobate" (submitted to Optics Express, 2026;
+> revised manuscript); pipeline:
+> https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface;
+> data: https://doi.org/10.5281/zenodo.23507013
+
+The revised manuscript moved the design point to an overcoupled cavity
+with `Q_L = 870` (`F_C = 28`, 32 % of photons detected) and reads the
+spin with a four-level model. `tests/test_revised_study.py` checks
+this package against its printed numbers. `tests/test_integration.py`
+keeps the `Q_L = 500` design point of the original submission as a
+regression test of the whole chain.
 
 Formalism: Rosenthal et al., PRX 13, 031022 (2023) and PRX 14,
 041008 (2024) (arXiv:2403.13110); decay-rate budget of the coupled
