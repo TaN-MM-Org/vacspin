@@ -1,12 +1,16 @@
-"""End to end: the package reproduces the design point of the source
-study (Mahim, Rahman and Mohsin, Optics Express (2026), submitted; the
-open pipeline at Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface) from
+"""End to end: the package reproduces the design point of the ORIGINAL
+SUBMISSION of the source study (Mahim, Rahman and Mohsin, Optics
+Express (2026), submitted; the open pipeline at
+Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface, release v1.1.1) from
 its stated inputs -- the overcoupled Q_L = 500 diamond nanocavity on
 TFLN: F_C ~ 19, end-to-end efficiency ~ 0.65, single-shot fidelity
-above 98% in a 100 ns window. The study's efficiency counts the whole
-enhanced emission of the coupled line as cavity photons (beta_form=
-"transition"); the default since 0.6.0 counts only the cavity-added
-part and gives 0.615. The chain runs spin model -> cavity ->
+above 98% in a 100 ns window. The revised manuscript moved the design
+point to Q_L = 870 (F_C = 28, efficiency 32 %) with a four-level
+readout model; tests/test_revised_study.py checks that version. This
+file stays as an end-to-end regression of the chain. The original
+submission's efficiency counts the whole enhanced emission of the
+coupled line as cavity photons (beta_form="transition"); the default
+since 0.6.0 counts only the cavity-added part and gives 0.615. The chain runs spin model -> cavity ->
 readout with no numbers passed by hand between stages."""
 import numpy as np
 
@@ -19,13 +23,13 @@ BUD = snv_emission()
 
 
 def _paper_interface(beta_form="purcell"):
-    """The paper's design point, from ITS stated inputs: Q_L = 500,
-    V = 0.68 (lam/n)^3, xi_pos = 0.5, taper transfer 0.991, chip 0.8,
+    """The original submission's design point, from ITS stated inputs:
+    Q_L = 500, V = 0.68 (lam/n)^3, xi_pos = 0.5, taper transfer 0.991, chip 0.8,
     detector 0.9, eta_wg = 1 - Q_L/Q_i with Q_i = 1.39e6 -- and the
     cyclicity and qubit frequency computed by THIS package's spin
-    model at the paper's operating field."""
+    model at that version's operating field."""
     b = field_on_circle(147.0, 0.125)
-    # the paper uses the MEASURED cyclicity 2244 (arXiv:2403.13110) at
+    # that version uses the MEASURED cyclicity 2244 (arXiv:2403.13110) at
     # its operating point; the model's swept-circle value at the
     # nominal angles is smaller because of the reported ~10 deg
     # residual misalignment -- and the model DOES reproduce 2244 at
@@ -43,22 +47,28 @@ def _paper_interface(beta_form="purcell"):
 
 def test_design_point_reproduced():
     ci, _ = _paper_interface()
-    assert abs(ci.f_c - 19.0) < 0.05 * 19.0       # paper: F_C ~ 19
+    assert abs(ci.f_c - 19.0) < 0.05 * 19.0       # original submission: F_C ~ 19
     ci.require_valid()                            # in-regime by design
     old, _ = _paper_interface("transition")
-    assert abs(old.eta - 0.65) < 0.05 * 0.65      # paper: eta ~ 65%
+    assert abs(old.eta - 0.65) < 0.05 * 0.65      # original submission: eta ~ 65%
     # the default differs only by the mode share: (F_C - 1) / F_C
     assert abs(ci.eta / old.eta - (ci.f_c - 1.0) / ci.f_c) < 1e-12
     assert abs(ci.eta - 0.6150) < 5e-5 and abs(old.eta - 0.6486) < 5e-5
 
 
 def test_fast_readout_fidelity():
-    """The paper's headline regime: single-shot fidelity above 98%
-    within a sub-100-ns window, with the dark leak computed from the
-    cavity linewidth and qubit frequency (power broadening at s = 2).
+    """The original submission's headline regime: single-shot fidelity
+    above 98% within a sub-100-ns window, with the dark leak computed
+    from the cavity linewidth and qubit frequency (power broadening at
+    s = 2), as that version did: the leak takes the spin-flipping line
+    A2 at the full strength of A1, which overstates that one channel
+    (A2 is weaker by about 1 / Lambda). That version left out the
+    channel the revised study finds dominant, the dark spin's own line
+    B2, so these numbers are a regression of the chain, not a bound on
+    the real fidelity.
     Since 0.4.0 the dark switch-on channel is evaluated exactly (the
     source pipeline used a 9-point quadrature, vacspin 0.3 a 24-point
-    sum); the numbers sit on the conservative side of the paper's
+    sum); the numbers sit on the conservative side of that version's
     98.5%: 0.9802 at the best of the four windows (0.9813 in 0.5.0,
     whose efficiency used F_C rather than F_C - 1; 0.9818 in 0.3.1),
     0.9481 at a full 100 ns with f0 = 0.99 (0.9488 in 0.5.0, 0.9512 in
