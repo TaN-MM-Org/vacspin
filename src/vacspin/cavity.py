@@ -8,7 +8,8 @@ branching ratio eta_BR (their Eq. 3), and the polarization overlap of
 the dipole with the cavity field (their Eqs. 6-10). The quantum
 efficiency eta_q, the ideal Purcell factor F_max and the position
 overlap are added as in the SnV-on-TFLN study of Mahim et al.
-(submitted to Optics Express, 2026):
+(submitted to Optics Express, 2026; revised manuscript, data
+doi:10.5281/zenodo.23507013):
 
     F_max = (3 / 4 pi^2) (lam/n)^3 Q_L / V         ideal Purcell factor
     F_C   = 1 + (F_max - 1) xi_pol xi_pos          the coupled transition
@@ -29,9 +30,21 @@ cavity mode; the bulk part still goes where it went without the
 cavity. So with no overlap (xi = 0) beta, g and C are exactly 0.
 Before 0.6.0 beta used F_C instead of F_C - 1 (and g likewise), which
 counted the bulk emission of C as cavity photons: beta was 0.342, not
-0, with no overlap, and the design point of the study above gave
-eta = 0.649 instead of 0.615. That form is still available as
-``beta_form="transition"``.
+0, with no overlap, and the Q_L = 500 design point of the study's
+original submission gave eta = 0.649 instead of 0.615. That form is
+still available as ``beta_form="transition"``.
+
+The revised study writes F_C = 1 + F_cav xi_pol xi_pos, with F_cav
+from its mode volume and Q_L; here the same kind of formula gives
+F_max and F_C = 1 + (F_max - 1) xi_pol xi_pos, so the two conventions
+differ by 1 in the Purcell factor (for its F_cav = 81, F_C = 28 there
+and 27.67 here). Its decay rate
+(its Eq. 1) also adds the cavity-enhanced emission of the D line,
+eta_q eta_DW (1 - eta_BR) (F_D - 1); `zeta` and `beta` here leave that
+term out (`f_partner` reports F_D when `delta_partner_hz` is given).
+At the revised design point (Q_L = 870, F_C = 28, F_D = 3.4) zeta is
+smaller by that term, 10.23 instead of 10.50, and so beta is 0.902
+instead of 0.905 (tests/test_revised_study.py).
 
 with V in units of (lam/n)^3 and kappa = f_cav / Q_L. In the g formula
 all three rates are in the same units: g_hz and kappa_hz are in Hz, and

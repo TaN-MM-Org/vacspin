@@ -399,7 +399,14 @@ def fidelity(eta: float, lam: float, gamma: float, tau: float,
     tau : readout window (s). s : saturation parameter.
     leak : off-resonant/resonant scattering ratio of the dark spin
         (power broadening included by the caller); 0 disables the
-        dark-scattering and switch-on channels.
+        dark-scattering and switch-on channels. Each leak excitation
+        switches the dark spin on with probability Lambda / (Lambda + 1),
+        as for excitation into the bright spin's excited state (the
+        spin-flipping line A2). Light the dark spin scatters through
+        its own spin-conserving line (B2) leaves it dark and is not
+        this channel; the revised source study finds that route
+        dominant once the optical line is Purcell-broadened, and this
+        model has no input for it.
     noise_rate : background count rate (1/s), present for both spin
         states. f0 : preparation/other infidelity prefactor.
     nt_switch : ignored since 0.4.0 (the switch-on channel is now
