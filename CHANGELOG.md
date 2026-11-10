@@ -4,6 +4,97 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.10.0 (2026-11-10)
+
+Failed spin preparations in the readout calibration, the D line in the
+cavity budget measured from two lifetimes, and five small fixes. No
+result changes by more than 3 parts in 10^7, and no number printed in
+the README or the tutorials changes.
+
+### Added
+
+- `fit_readout_histograms(..., prep_error_bright=..., prep_error_dark=...)`
+  and the names `"prep_error_bright"` and `"prep_error_dark"` in
+  `vary`: the share of the bright histogram's shots in which the spin
+  started dark, and of the dark histogram's shots in which it started
+  bright. The histograms are fitted with (1 - e_b) P_bright + e_b P_dark
+  and (1 - e_d) P_dark + e_d P_bright. Each share must lie in [0, 0.5);
+  a varied one left at None starts from a scan of its histogram's
+  likelihood; a fit whose share runs to 0 is refused with the advice to
+  hold it at 0. `ReadoutFit.f0` (a new property) is
+  1 - e_b - e_d, the `f0` that turns the readout's own fidelity into
+  the measured one. Left out, nothing is modeled and `values` keeps its
+  three keys, as before. Tests (tests/test_preparation_error.py): in
+  the well-separated limit the closed-form binomial and Poisson
+  maximum-likelihood estimates and error bars (derived in the test) to
+  1e-7 and 1e-6; the exact expected histograms (1e12 shots, from the
+  distributions of `vacspin.readout`) return all five parameters to
+  1e-6 in two cases, one with leak; over 150 simulated experiments the
+  pulls have means within 0.25 and spreads within 15 % of 1, and 95 %
+  of p-values exceed 0.01; 20 % failed preparations are found within 3
+  error bars (p > 0.01, against p < 1e-6 without the share); the
+  fidelity of the mixed distributions, maximized over thresholds in
+  the test, equals `fidelity(..., f0=1 - e_b - e_d)` to 1e-12 in three
+  cases; the error bar of `f0` equals its closed form to 1e-8.
+- `purcell_from_lifetimes(..., delta_partner_hz=..., include_d_line=True)`:
+  the exact inverse of `CavityInterface(..., include_d_line=True)`.
+  The shortening is split between the C line and the D line,
+  F_C = 1 + (zeta - 1) / (a + b L) with b = eta_q eta_DW (1 - eta_BR) and
+  L = 1 / (1 + (2 delta / kappa)^2); the cooperativity and `g_hz` are
+  those of the C line, and `f_partner` (F_D) is added. The error bar of
+  `kappa_hz` reaches F_C through L. At the revised study's design point
+  the default inverse gives F_C = 28.78 and this one 28.00 (the
+  design). Tests (tests/test_purcell_d_line.py): the forward budget's
+  zeta, cooperativity, beta, F_C, g_hz and F_D to 1e-12 at Q_L = 300,
+  870 and 3000; the covariance against central finite differences to
+  1e-6; the error bars against 400000 sampled inputs within 2 %.
+- README example 9 (failed preparations: 7.6 +/- 0.7 % and
+  2.7 +/- 0.3 % found for 8 % and 3 % simulated; fidelity at 50 us
+  0.906 for the readout, 0.864 as measured) and a continuation of
+  example 8 (F_C from the two lifetimes, with and without the D line).
+
+### Fixed
+
+- `xi_pol_overlap()` defaulted to the rounded angle 54.7356 degrees and
+  returned 0.666666497 instead of the documented 2/3. The default is
+  now arccos(1/sqrt 3) to full precision, and the overlap 2/3 to
+  round-off. Budgets built on the default move by less than 3 parts in
+  10^7; README example 2: F_C 19.2918796 before, 19.2918842 after; eta
+  0.61431583 before, 0.61431586 after; fidelity in 50 ns 0.999637702
+  both (difference 1.3e-11). Test:
+  `test_xi_pol_overlap_default_is_two_thirds`.
+- `poisson_pmf` and `geometric_pmf` took any `kmax`: -1 gave an empty
+  array, 2.9 was cut to 2 (three values), and infinity raised
+  `OverflowError`. They now refuse a `kmax` that is not a whole number
+  of at least 0 with a `ValueError` (10.0 and NumPy integers work as
+  before). Test: `test_pmf_kmax_must_be_a_whole_number`.
+- `design_fields` cut a fractional `n_pick` down (2.9 picked 2
+  points); it now refuses it. Test:
+  `test_design_fields_refuses_a_fractional_n_pick`.
+- `fit_readout_histograms` with a dark histogram that has counts while
+  the background is held at 0 refused with a message that blamed the
+  starting values ("start closer"), and printed a model mean equal to
+  the measured one (5.021 and 5.021 in the test case). The message now
+  names the dark histogram and the background. Test:
+  `test_dark_counts_with_the_background_held_at_zero_are_named`.
+- `fit_spin_parameters` at a `strain_scale` other than 1 returns the
+  unscaled strain, so the fitted set reproduces the data only at that
+  scale, but its `reference` left the scale out. It now records it
+  (for example `strain_scale=1.3`); at 1 the reference is unchanged.
+  Test: `test_spin_fit_reference_records_the_strain_scale`.
+
+### Changed
+
+- The `polarization_rate` docstring states that `delta_over_gamma` is
+  the angular detuning over the decay rate (equivalently, the detuning
+  in Hz over the linewidth gamma / (2 pi) in Hz).
+- README: example 9 and the example 8 continuation, the new checks, the
+  refusals, the corrections above and an updated "Limits" (failed
+  preparations can be fitted; the D-line inverse); the test count (now
+  199; 0.9.0 had 177).
+- CI: the test workflow runs on `ubuntu-24.04` instead of
+  `ubuntu-latest`, which no longer offers Python 3.9.
+
 ## 0.9.0 (2026-10-22)
 
 The four-level readout of the revised source study, and its D-line

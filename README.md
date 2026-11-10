@@ -39,6 +39,8 @@ optics around it, the package answers questions such as:
 - In a broad cavity, where the dark spin also scatters the readout
   laser through its own transition, what is the readout fidelity? (A
   four-level model, new in 0.9.0.)
+- In how many of your shots did the spin start in the wrong state, and
+  how much of your measured fidelity does that cost? (New in 0.10.0.)
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -165,7 +167,8 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.9.0 (examples 1 to 7 print the same as with 0.6.0 to 0.8.1). The cavity, detector, attempt-rate and
+printed with vacspin 0.10.0. Examples 1 to 7 print the same as with
+0.6.0 to 0.9.0, and example 8 the same as with 0.9.0. The cavity, detector, attempt-rate and
 noise values are illustrative, not a recommended design; the centre's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
@@ -611,7 +614,8 @@ What the fit can and cannot tell:
   describe your histograms. A common cause is imperfect spin
   preparation, which gives extra shots with background counts only.
   The test suite shows that 20 % failed preparations among 5000 shots
-  give a p-value below 10^-6.
+  give a p-value below 10^-6. Since 0.10.0 the fit can include failed
+  preparations; see example 9.
 
 ### 8. Four-level readout in a broad cavity (new in 0.9.0)
 
@@ -682,6 +686,140 @@ distributions themselves. Extra homogeneous broadening
 (`noise_rate`) are inputs. The last line shows why the two-state model
 must not be fed the B2 light: as `leak`, every excitation switches the
 dark spin on, and the fidelity falls to about one half.
+
+The way back, from two measured lifetimes to the cavity, can count the
+D line too (new in 0.10.0). Continuing example 8 (run it first), with
+the design's own lifetime standing in for a measured one:
+
+```python
+# Continuing example 8: from the two lifetimes back to the cavity
+bud = vs.snv_emission()
+tau_on = ci.tau_cav_s                  # stand-in for your measured lifetime
+for d in (False, True):
+    m = vs.purcell_from_lifetimes(
+        bud.tau0_s, tau_on, budget=bud, kappa_hz=ci.kappa_hz,
+        delta_partner_hz=line.delta_g_ghz * 1e9, include_d_line=d)["values"]
+    print(f"include_d_line={d}: F_C {m['f_c']:.2f}, "
+          f"g {m['g_hz'] / 1e9:.2f} GHz, beta {m['beta']:.3f}")
+print(f"design: F_C {ci.f_c:.2f}, g {ci.g_hz / 1e9:.2f} GHz, beta {ci.beta:.3f}")
+```
+
+```
+include_d_line=False: F_C 28.78, g 6.84 GHz, beta 0.905
+include_d_line=True: F_C 28.00, g 6.74 GHz, beta 0.905
+design: F_C 28.00, g 6.74 GHz, beta 0.905
+```
+
+Without the D line, `purcell_from_lifetimes` reads the whole shortening
+of the lifetime as faster emission on the coupled C line, so in this
+broad cavity it puts the Purcell factor 3 % too high. With
+`include_d_line=True` it splits the shortening between the two lines
+in the ratio that the cavity's Lorentzian sets at the D line, and
+returns the design exactly. The fraction of photons that go into the
+cavity mode, `beta`, does not depend on how the shortening is split.
+
+### 9. Failed spin preparations in your histograms (new in 0.10.0)
+
+In a real experiment the spin does not always start in the state you
+prepared. A shot that should be bright but started dark gives only
+background counts, and a dark shot that started bright gives bright
+counts. `fit_readout_histograms` can fit both shares, the preparation
+errors `prep_error_bright` and `prep_error_dark`, together with the
+other parameters.
+
+```python
+import numpy as np
+import vacspin as vs
+
+gamma = vs.snv_emission().gamma0       # optical decay rate, 1/s
+tau, s = 20e-6, 10.0                   # counting window (s), drive
+
+# Stand-in data as in example 7 (but eta = 0.4 %), except that 8 % of
+# the shots prepared bright, and 3 % of those prepared dark, started in
+# the other spin state.
+rng = np.random.default_rng(7)
+r = 0.5 * gamma * s / (1 + s)
+
+
+def bright(n):                         # signal until the spin flips
+    t_flip = rng.exponential((1 + 2244.0) / r, n)
+    return (rng.poisson(0.004 * r * np.minimum(t_flip, tau))
+            + rng.poisson(4000 * tau, n))
+
+
+def dark(n):                           # background only
+    return rng.poisson(4000 * tau, n)
+
+
+kb = np.where(rng.random(5000) < 0.08, dark(5000), bright(5000))
+kd = np.where(rng.random(5000) < 0.03, bright(5000), dark(5000))
+hb, hd = np.bincount(kb), np.bincount(kd)
+
+plain = vs.fit_readout_histograms(hb, gamma, tau, s, dark_hist=hd,
+                                  vary=("eta", "lam", "noise_rate"))
+print(f"without them: chi2 = {plain.chi2:.0f} for {plain.chi2_dof} "
+      "degrees of freedom")
+
+fit = vs.fit_readout_histograms(
+    hb, gamma, tau, s, dark_hist=hd,
+    vary=("eta", "lam", "noise_rate", "prep_error_bright",
+          "prep_error_dark"))
+v, e = fit.values, fit.sigma
+print(f"eta:        {100 * v['eta']:.3f} +/- {100 * e['eta']:.3f} %")
+print(f"lam:        {v['lam']:.0f} +/- {e['lam']:.0f}")
+print(f"noise_rate: {v['noise_rate']:.0f} +/- {e['noise_rate']:.0f} counts/s")
+for k in ("prep_error_bright", "prep_error_dark"):
+    print(f"{k}: {100 * v[k]:.1f} +/- {100 * e[k]:.1f} %")
+print(f"chi2 = {fit.chi2:.1f} for {fit.chi2_dof} degrees of freedom, "
+      f"p-value {fit.p_value:.2f}; f0 = {fit.f0:.3f}")
+
+# The readout alone, and what the experiment measures with these
+# preparations, for a 50 us window
+kw = dict(s=s, noise_rate=v["noise_rate"])
+alone = vs.fidelity(v["eta"], v["lam"], gamma, 50e-6, **kw)["fidelity"]
+seen = vs.fidelity(v["eta"], v["lam"], gamma, 50e-6, f0=fit.f0,
+                   **kw)["fidelity"]
+print(f"fidelity at 50 us: readout {alone:.3f}, measured {seen:.3f}")
+```
+
+```
+without them: chi2 = 1864 for 18 degrees of freedom
+eta:        0.403 +/- 0.005 %
+lam:        2251 +/- 93
+noise_rate: 3958 +/- 214 counts/s
+prep_error_bright: 7.6 +/- 0.7 %
+prep_error_dark: 2.7 +/- 0.3 %
+chi2 = 22.5 for 24 degrees of freedom, p-value 0.55; f0 = 0.897
+fidelity at 50 us: readout 0.906, measured 0.864
+```
+
+Without the preparation errors the model cannot describe these
+histograms at all (a chi-squared of 1864 where about 18 is expected).
+With them, every fitted value lies within one error bar of the
+simulated one. The bright histogram is fitted with
+`(1 - e_b) P_bright + e_b P_dark`, and the dark one with
+`(1 - e_d) P_dark + e_d P_bright`, where `P_bright` and `P_dark` are the
+count distributions that `fidelity` uses. Averaged over the two
+preparations, the fidelity you measure is then
+`f0 F + (1 - f0) / 2` with `f0 = 1 - e_b - e_d`, where `F` is the
+fidelity of the readout alone. That is how `fidelity` applies `f0`, and
+`fit.f0` gives it. Its error bar comes from `propagate_uncertainty`, as
+for any other function of the fit.
+
+Some limits of what the histograms can tell:
+
+- Each share must lie between 0 and 0.5. A larger one would swap the
+  meaning of "bright" and "dark".
+- A share is measured only as well as the two count distributions
+  differ. When both spin states often give zero counts, a failed
+  preparation looks like an early spin flip or a missed photon. Run
+  this example with example 7's efficiency of 0.2 % instead of 0.4 %
+  and the 8 % share comes out 4.6 +/- 1.3 %; the fit refuses it,
+  because the error bar is more than a quarter of the value.
+- With no failed preparations in the data, the fitted share runs to
+  zero, where large-sample error bars do not apply. The fit then
+  refuses and says to hold the share at 0.
+- `prep_error_dark` needs a dark histogram.
 
 ## Tutorials
 
@@ -913,7 +1051,13 @@ arXiv:2511.05740)
   `EmissionBudget` also the Purcell factor `F_C = 1 + C / a` (`a` the
   radiative fraction), and with the cavity linewidth `kappa_hz` also
   the coupling rate `g_hz`. Each comes with its error bar and the full
-  covariance.
+  covariance. With `include_d_line=True` and `delta_partner_hz` (new in
+  0.10.0) it is the exact inverse of `CavityInterface(...,
+  include_d_line=True)`: part of the shortening is then D-line
+  emission, `F_C = 1 + (zeta - 1) / (a + b L)` with
+  `b = eta_q eta_DW (1 - eta_BR)` and `L` the cavity's Lorentzian at
+  the D line, and it also returns `f_partner` (the D line's Purcell
+  factor).
 
 **Readout** (`vacspin.readout`; Rosenthal et al., arXiv:2403.13110,
 Appendix A)
@@ -999,7 +1143,11 @@ four-level model of the revised source study)
   histograms by maximum likelihood; returns a `ReadoutFit` with
   `values`, `sigma`, `cov`, `log_likelihood`, and a Pearson goodness
   of fit (`chi2`, `chi2_dof`, `p_value`, after pooling count bins until
-  each expects at least 5 shots).
+  each expects at least 5 shots). Since 0.10.0 `vary` can also hold
+  `prep_error_bright` and `prep_error_dark`, the shares of shots in
+  which the spin started in the other state (example 9), and
+  `ReadoutFit.f0` gives the matching `f0`, `1 - prep_error_bright -
+  prep_error_dark`, for `fidelity`.
 - `fit_lifetime_histogram` (new in 0.8.0): fit the excited-state
   lifetime to a time-resolved photon histogram (time-correlated single
   photon counting), with a constant background, by Poisson maximum
@@ -1125,11 +1273,22 @@ four-level model of the revised source study)
   (round-off out of control), or a spectral-diffusion average that has
   not converged on 1025 points;
 - in `field_from_axis` (since 0.9.0): a negative or non-finite field
-  size, or a non-finite angle.
+  size, or a non-finite angle;
+- in `fit_readout_histograms` (since 0.10.0): a preparation error that
+  is not a number in [0, 0.5), a varied one that starts at 0 or runs to
+  0 during the fit (the histograms show no failed preparations), and a
+  varied `prep_error_dark` without a dark histogram;
+- in `purcell_from_lifetimes` (since 0.10.0): `include_d_line` that is
+  not True or False, or True without `budget`, `kappa_hz` or
+  `delta_partner_hz`, or with a `delta_partner_hz` that is not positive
+  and finite;
+- in `poisson_pmf` and `geometric_pmf` (since 0.10.0): a `kmax` that
+  is not a whole number of at least 0, and in `design_fields` an
+  `n_pick` that is not a whole number.
 
 ## How the results are checked
 
-177 automated tests run on every push and pull request, on Python 3.9,
+199 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -1514,14 +1673,87 @@ since 0.5.0)
   spread of 400000 sampled inputs elsewhere, with the right
   correlation (to 0.01).
 
+**Failed preparations** (since 0.10.0; `tests/test_preparation_error.py`)
+
+- Against closed forms: when the bright spin almost never gives zero
+  counts (Poisson mean 30) and the dark spin never gives any, a failed
+  preparation is visible in every shot, and the likelihood splits into
+  two binomial shares and one Poisson mean. The fitted shares, `eta`
+  and their error bars equal those closed forms (to 1e-7 and 1e-6),
+  with correlations below 1e-6.
+- The exact expected histograms (1e12 shots per state, built from the
+  count distributions that `fidelity` uses, mixed and rounded) return
+  all five parameters from the automatic start (to 1e-6), in two
+  cases, one with a leaking dark spin.
+- 150 simulated experiments of 3000 bright and 3000 dark shots with
+  overlapping histograms: (fit minus truth) / error bar has a mean
+  within 0.25 of 0 and a spread within 15 % of 1 for all five
+  parameters, and at least 95 % of the p-values are above 0.01.
+- 20 % failed preparations among 5000 bright shots: without the share
+  the p-value is below 10^-6; with it the fit passes (p above 0.01) and
+  finds the 20 % within 3 error bars.
+- The fidelity measured with failed preparations, computed in the test
+  threshold by threshold from the mixed distributions, equals
+  `fidelity(..., f0 = 1 - e_b - e_d)` (to 1e-12, same threshold), in
+  three cases. The error bar of `f0` equals the closed form from the
+  fit's covariance (to 1e-8 relative). Without preparation errors
+  every fit is the same as before.
+
+**The measured cavity budget with the D line** (since 0.10.0;
+`tests/test_purcell_d_line.py`)
+
+- Given the lifetimes of a `CavityInterface` design with
+  `include_d_line=True`, `purcell_from_lifetimes(...,
+  include_d_line=True)` returns its `zeta`, C-line cooperativity,
+  `beta`, `F_C`, `g_hz` and D-line Purcell factor (to 1 part in
+  10^12), at cavity linewidths of 1.6, 0.56 and 0.16 THz. At the
+  revised study's design point it gives `F_C = 28.00`, where the
+  default inverse gives 28.78.
+- Its error bars match those built from central finite differences of
+  the inverse (to 1e-6 relative) and the spread of 400000 sampled
+  inputs (within 2 %, with the right correlation to 0.01).
+
 **Inputs**
 
 - NaN and infinite values are refused across the parameter classes,
   the cavity, readout and remote-entanglement functions (with array
   input to `polarization_rate` still accepted), and since 0.5.0 by
   `xi_pol_overlap`; a target fidelity must be a real number.
+- Since 0.10.0 (`tests/test_fixes_0_10_0.py`): `xi_pol_overlap()`
+  equals 2/3 (to 1e-15); a `kmax` or `n_pick` that is not a whole
+  number is refused; a dark histogram with counts and no background in
+  the model is named as the cause; and the reference of a spin fit
+  records a `strain_scale` other than 1.
 
 ## Corrections in earlier versions
+
+**0.10.0 fixes five small problems.** None changes a result by more
+than 3 parts in 10^7.
+
+- `xi_pol_overlap()` used the rounded angle 54.7356 degrees as its
+  default, so it returned 0.66666650 instead of the documented 2/3.
+  The default is now arccos(1/sqrt 3) to full precision. Any budget
+  built on the default moves by less than 3 parts in 10^7: for
+  example 2, `F_C` goes from 19.2918796 to 19.2918842, `eta` from
+  0.61431583 to 0.61431586, and the fidelity in 50 ns from
+  0.999637702 to 0.999637702 (a change of 1.3e-11). No printed number
+  in this README or in the tutorials changes.
+- `poisson_pmf` and `geometric_pmf` returned an empty array for a
+  negative `kmax`, cut a fractional `kmax` down (2.9 gave three
+  values, for k = 0 to 2), and raised `OverflowError` for an infinite
+  one. They now refuse a `kmax` that is not a whole number of at least
+  0. `design_fields` likewise cut `n_pick = 2.9` down to 2 points; it
+  now refuses it.
+- `fit_readout_histograms` with a dark histogram that has counts,
+  while the background is held at 0 (`noise_rate` left at None and not
+  varied), refused with a message that blamed the starting values and
+  printed a model mean equal to the measured one. It now says that the
+  dark histogram has counts the model cannot give, and to fit
+  `noise_rate`.
+- `fit_spin_parameters` at a `strain_scale` other than 1 returns the
+  unscaled strain, so its parameter set reproduces the data only at
+  that scale. Its `reference` did not say so; it now records the
+  `strain_scale`.
 
 **0.8.0 refuses a cyclicity or Rabi rate at a field too weak to split
 the qubit.** At zero field each pair of states is exactly degenerate,
@@ -1700,10 +1932,16 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   `gamma`, `s`, `tau` and `leak` fixed, and its error bars are
   large-sample error bars: they assume many shots, and the fit
   refuses a parameter whose error bar exceeds a quarter of its value.
-  It describes the same two-state counting model as `fidelity`, so
-  effects outside that model (failed preparation, detector dead time,
-  drifts during the run) show up as a small `p_value`, not as a
-  correction.
+  It describes the same two-state counting model as `fidelity`. Since
+  0.10.0 it can add failed preparations, one share per histogram, each
+  below 0.5 and the same for every shot of that histogram. Other
+  effects outside the model (detector dead time, drifts during the
+  run, a preparation error that changes from shot to shot in some
+  other way) still show up only as a small `p_value`, not as a
+  correction. The refusal of poorly determined values also means that
+  a share only a few error bars above zero is refused about as often as
+  it is fitted, so the shares that are reported lean high in that
+  case.
 - **The `lab` fits** use a local Levenberg-Marquardt search (a standard
   step-by-step least-squares method) from your starting set; the error
   bars assume independent Gaussian measurement errors, and the greedy
@@ -1721,10 +1959,14 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   flat, show up as a small `p_value`.
 - **`purcell_from_lifetimes`** (since 0.8.0) reads the whole
   shortening of the lifetime as Purcell enhancement on the coupled
-  line. The reference lifetime must be that of the same emitter with
-  the cavity tuned away; anything else that changes between the two
-  measurements is counted as cavity effect. The two error bars are
-  taken as independent, and the propagation is first-order.
+  line, or, with `include_d_line=True` (since 0.10.0), on the coupled
+  line and the D line in the ratio that the cavity's Lorentzian sets.
+  It knows no other decay channel the cavity could speed up. The
+  reference lifetime must be that of the same emitter with the cavity
+  tuned away; anything else that changes between the two measurements
+  is counted as cavity effect. The error bars of the lifetimes and of
+  the cavity linewidth are taken as independent, and the propagation
+  is first-order.
 - **`optimal_window`** finds the highest peak it sees on an 80-point
   scan and refines it. The fidelity is the larger of smooth curves (one
   per threshold), so it can have more than one local peak; a narrow
