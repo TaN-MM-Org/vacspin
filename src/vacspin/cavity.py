@@ -94,14 +94,24 @@ def lorentzian_suppression(delta_hz, f_cav_hz, q_loaded):
     return 1.0 / (1.0 + x * x)
 
 
-def xi_pol_overlap(theta_deg: float = 54.7356,
+# the angle between a <111> axis and the normal of a (001) surface,
+# arccos(1/sqrt 3) = 54.7356103... degrees
+_THETA_111_DEG = float(np.degrees(np.arccos(1.0 / np.sqrt(3.0))))
+
+
+def xi_pol_overlap(theta_deg: float = _THETA_111_DEG,
                    psi_deg: float = 45.0) -> float:
     """Polarization overlap |mu_hat . e_cav|^2 of a <111> dipole with a
     linearly polarized in-plane cavity mode:
     sin^2(theta) (1 + sin 2 psi) / 2, equal to 2/3 at psi = 45 deg for
     theta = arccos(1/sqrt 3) (a <100>-oriented sample). Both angles
     are in degrees and must be finite (since 0.5.0 a NaN or infinite
-    angle is refused instead of returning NaN)."""
+    angle is refused instead of returning NaN).
+
+    Since 0.10.0 the default theta is arccos(1/sqrt 3) to full
+    precision, so the default overlap is 2/3 to round-off. Before, the
+    default was the rounded 54.7356 degrees, which gave 0.66666650
+    (2.5e-7 below 2/3)."""
     th, ps = float(theta_deg), float(psi_deg)
     if not (np.isfinite(th) and np.isfinite(ps)):
         raise ValueError("theta_deg and psi_deg must be finite angles in "
@@ -326,7 +336,9 @@ def purcell_from_lifetimes(tau_ref_s, tau_cav_s,
                            sigma_cav_s: Optional[float] = None,
                            budget: Optional[EmissionBudget] = None,
                            kappa_hz: Optional[float] = None,
-                           sigma_kappa_hz: float = 0.0) -> dict:
+                           sigma_kappa_hz: float = 0.0,
+                           delta_partner_hz: Optional[float] = None,
+                           include_d_line: bool = False) -> dict:
     """The cavity budget measured from two lifetimes (new in 0.8.0).
 
     The inverse of `CavityInterface` for a lab that has measured the
@@ -354,17 +366,52 @@ def purcell_from_lifetimes(tau_ref_s, tau_cav_s,
     budget and "g_hz" with kappa_hz) to its value and error bar, and
     `cov` is their covariance matrix in the order of `names`.
 
+    include_d_line=True (new in 0.10.0) is the exact inverse of
+    `CavityInterface(..., include_d_line=True)`: the cavity also speeds
+    up the D line, `delta_partner_hz` (Hz) away, so part of the
+    shortening is D-line emission. In that budget
+    zeta - 1 = a (F_C - 1) + b (F_D - 1), with b = eta_q eta_DW
+    (1 - eta_BR) and F_D - 1 = (F_C - 1) L, where
+    L = 1 / (1 + (2 delta_partner_hz / kappa_hz)^2) is the cavity's
+    Lorentzian at the D line. So
+
+        F_C = 1 + (zeta - 1) / (a + b L),   F_D = 1 + (F_C - 1) L,
+        cooperativity = a (F_C - 1) (the C line alone, as in
+            CavityInterface), g from that cooperativity as above,
+
+    while zeta and beta = (zeta - 1) / zeta keep their meaning. It needs
+    `budget`, `kappa_hz` and `delta_partner_hz`, and adds "f_partner"
+    (F_D) to the results. The error bar of `kappa_hz` also reaches F_C
+    through L. Without it (the default) every result is as before.
+
     Refuses (ValueError): lifetimes that are not positive and finite,
     negative or non-finite error bars, a cavity lifetime that is not
     shorter than the reference (no Purcell enhancement to measure),
     a cooperativity whose error bar exceeds a quarter of its value
     (first-order error bars are then not reliable), and a `kappa_hz`
-    that is not positive and finite.
+    that is not positive and finite; since 0.10.0 also `include_d_line`
+    that is not True or False, True without `budget`, `kappa_hz` or
+    `delta_partner_hz`, and a `delta_partner_hz` that is not positive
+    and finite.
     """
     t_r, s_r = _lifetime_input(tau_ref_s, sigma_ref_s, "tau_ref_s")
     t_c, s_c = _lifetime_input(tau_cav_s, sigma_cav_s, "tau_cav_s")
     if budget is not None and not isinstance(budget, EmissionBudget):
         raise ValueError("budget must be an EmissionBudget")
+    if not isinstance(include_d_line, bool):
+        raise ValueError("include_d_line must be True or False")
+    if include_d_line:
+        if budget is None or kappa_hz is None or delta_partner_hz is None:
+            raise ValueError("include_d_line=True needs budget, kappa_hz and "
+                             "delta_partner_hz (the D line's detuning from "
+                             "the cavity, Hz)")
+        try:
+            dlt = float(delta_partner_hz)
+        except (TypeError, ValueError):
+            dlt = float("nan")
+        if not (np.isfinite(dlt) and dlt > 0.0):
+            raise ValueError("delta_partner_hz must be positive and finite "
+                             "(the D line's detuning from the cavity, Hz)")
     if not t_c < t_r:
         raise ValueError(
             f"the cavity lifetime ({t_c:.4g} s) is not shorter than the "
@@ -395,6 +442,9 @@ def purcell_from_lifetimes(tau_ref_s, tau_cav_s,
                              "linewidth in Hz")
         if not (np.isfinite(s_k) and s_k >= 0.0):
             raise ValueError("sigma_kappa_hz must be finite and >= 0")
+        if include_d_line:
+            return _purcell_with_d_line(t_r, s_r, t_c, s_c, budget, kap,
+                                        s_k, dlt)
         g = 0.5 * np.sqrt(c * kap / (2.0 * np.pi * t_r))
         names.append("g_hz")
         vals.append(float(g))
@@ -405,12 +455,49 @@ def purcell_from_lifetimes(tau_ref_s, tau_cav_s,
     jac = np.array(rows)
     cov = jac @ np.diag([s_r ** 2, s_c ** 2, s_k ** 2]) @ jac.T
     sig = np.sqrt(np.maximum(np.diag(cov), 0.0))
-    if sig[1] > 0.25 * c:
+    _require_precise_cooperativity(c, sig[1])
+    return {"values": dict(zip(names, (float(v) for v in vals))),
+            "sigma": dict(zip(names, (float(v) for v in sig))),
+            "cov": cov, "names": tuple(names)}
+
+
+def _require_precise_cooperativity(c, sigma_c):
+    if sigma_c > 0.25 * c:
         raise ValueError(
-            f"the cooperativity {c:.4g} +/- {sig[1]:.2g} is not determined "
+            f"the cooperativity {c:.4g} +/- {sigma_c:.2g} is not determined "
             "to better than a quarter of its value, where first-order "
             "error bars are not reliable; measure the lifetimes more "
             "precisely")
+
+
+def _purcell_with_d_line(t_r, s_r, t_c, s_c, budget, kap, s_k, dlt):
+    """`purcell_from_lifetimes(..., include_d_line=True)` (since 0.10.0):
+    the inverse of the CavityInterface budget with the D-line term, with
+    exact first-order derivatives with respect to (tau_ref, tau_cav,
+    kappa)."""
+    a = budget.radiative_fraction
+    b = budget.eta_q * budget.eta_dw * (1.0 - budget.eta_br)
+    zeta = t_r / t_c
+    c_tot = zeta - 1.0                          # C and D lines together
+    dc = np.array([1.0 / t_c, -t_r / t_c ** 2, 0.0])
+    u = (2.0 * dlt / kap) ** 2
+    lor = 1.0 / (1.0 + u)                       # Lorentzian at the D line
+    dlor = np.array([0.0, 0.0, 2.0 * u * lor ** 2 / kap])
+    den = a + b * lor
+    fm1 = c_tot / den                           # F_C - 1
+    dfm1 = dc / den - c_tot * b * dlor / den ** 2
+    coop = a * fm1                              # the C line alone
+    g = 0.5 * np.sqrt(coop * kap / (2.0 * np.pi * t_r))
+    # d ln g = (d ln coop + d ln kappa - d ln tau_ref) / 2
+    dg = 0.5 * g * (dfm1 / fm1 + np.array([-1.0 / t_r, 0.0, 1.0 / kap]))
+    names = ("zeta", "cooperativity", "beta", "f_c", "g_hz", "f_partner")
+    vals = (zeta, coop, c_tot / zeta, 1.0 + fm1, g, 1.0 + fm1 * lor)
+    jac = np.array([dc, a * dfm1,
+                    [t_c / t_r ** 2, -1.0 / t_r, 0.0],
+                    dfm1, dg, dfm1 * lor + fm1 * dlor])
+    cov = jac @ np.diag([s_r ** 2, s_c ** 2, s_k ** 2]) @ jac.T
+    sig = np.sqrt(np.maximum(np.diag(cov), 0.0))
+    _require_precise_cooperativity(coop, sig[1])
     return {"values": dict(zip(names, (float(v) for v in vals))),
             "sigma": dict(zip(names, (float(v) for v in sig))),
             "cov": cov, "names": tuple(names)}

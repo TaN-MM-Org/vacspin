@@ -84,7 +84,12 @@ def _check_background(leak, noise_rate):
 def polarization_rate(gamma, lam, s=1.0, delta_over_gamma=0.0):
     """Spin polarisation (bright-record termination) rate
     Gp = R / (1 + Lambda), R = (gamma/2) s / (1 + s + (2 delta/gamma)^2)
-    (Rosenthal Eq. A8)."""
+    (Rosenthal Eq. A8).
+
+    gamma is the decay rate in 1/s, so delta_over_gamma is the angular
+    detuning 2 pi Delta_Hz over gamma. Equivalently it is the detuning
+    in Hz over the linewidth gamma / (2 pi) in Hz. Do not divide a
+    detuning in Hz by gamma in 1/s: that is 2 pi too small."""
     # element-wise, so array inputs keep working
     for name, v in (("gamma", gamma), ("s", s)):
         v = np.asarray(v, dtype=float)
@@ -134,6 +139,20 @@ def fidelity_threshold1(n_bright, n_dark, f0=1.0):
     return float(0.5 + 0.5 * f0 * (np.exp(-n_dark) - np.exp(-n_bright)))
 
 
+def _check_kmax(kmax) -> int:
+    """kmax as an int: a whole number >= 0 (an int, or a float with no
+    fractional part). Since 0.10.0; before, a negative kmax gave an empty
+    array and a fractional one was cut down without notice."""
+    ok = isinstance(kmax, numbers.Real) and not isinstance(kmax, bool)
+    if ok:
+        k = float(kmax)
+        ok = math.isfinite(k) and k >= 0.0 and k == math.floor(k)
+    if not ok:
+        raise ValueError("kmax must be a whole number of counts >= 0 "
+                         f"(got {kmax!r})")
+    return int(kmax)
+
+
 def geometric_pmf(mean, kmax):
     """Flip-terminated detected-count distribution: each emission is
     detected (probability p = mean/(mean+1)) or the spin flips, so
@@ -141,19 +160,22 @@ def geometric_pmf(mean, kmax):
     bookkeeping). The continuous Poisson-process model's exact
     infinite-window limit is the same law with mean eta (Lambda + 1);
     the two agree at order 1/Lambda, and the tests pin both
-    statements."""
+    statements. Returns P(K = k) for k = 0..kmax; kmax must be a whole
+    number >= 0 (since 0.10.0)."""
     if not np.isfinite(mean) or mean < 0:
         raise ValueError("mean must be finite and >= 0")
+    kmax = _check_kmax(kmax)
     p = mean / (mean + 1.0)
-    ks = np.arange(int(kmax) + 1)
+    ks = np.arange(kmax + 1)
     return (1.0 - p) * p ** ks
 
 
 def poisson_pmf(mean, kmax):
-    """Poisson pmf up to kmax, computed in log space."""
+    """Poisson pmf for k = 0..kmax, computed in log space; kmax must be
+    a whole number >= 0 (since 0.10.0)."""
     if not np.isfinite(mean) or mean < 0:
         raise ValueError("mean must be finite and >= 0")
-    kmax = int(kmax)
+    kmax = _check_kmax(kmax)
     ks = np.arange(kmax + 1)
     lgf = np.concatenate(([0.0], np.cumsum(np.log(np.arange(1, kmax + 1)))))
     if mean == 0.0:
@@ -409,7 +431,9 @@ def fidelity(eta: float, lam: float, gamma: float, tau: float,
         model has no input for it: use `vacspin.fidelity_four_level`
         (new in 0.9.0) there.
     noise_rate : background count rate (1/s), present for both spin
-        states. f0 : preparation/other infidelity prefactor.
+        states. f0 : preparation/other infidelity prefactor; with
+        failed preparations fitted by `fit_readout_histograms`,
+        `ReadoutFit.f0` (since 0.10.0) is the value that matches them.
     nt_switch : ignored since 0.4.0 (the switch-on channel is now
         evaluated exactly); passing it gives a DeprecationWarning.
     threshold : None (default) for the best threshold, or (since 0.8.0)

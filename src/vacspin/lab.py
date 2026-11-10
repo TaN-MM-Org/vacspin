@@ -49,7 +49,9 @@ Since 0.5.0 two more tools check a lab's own data against the model:
 * `fit_readout_histograms`: fit the detection efficiency, cyclicity
   and background of the readout model (`vacspin.readout`) to measured
   single-shot photon-count histograms by maximum likelihood, with
-  large-sample error bars and a Pearson goodness-of-fit test.
+  large-sample error bars and a Pearson goodness-of-fit test. Since
+  0.10.0 it can also fit the share of failed spin preparations in each
+  histogram.
 
 Since 0.8.0 `fit_lifetime_histogram` fits the excited-state lifetime to
 a time-resolved photon histogram (Poisson maximum likelihood, constant
@@ -61,6 +63,7 @@ from __future__ import annotations
 import csv
 import dataclasses
 import math
+import numbers
 from typing import Optional
 
 import numpy as np
@@ -369,6 +372,11 @@ def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
         chi-squared is reported; without them the error bars are scaled
         from the residual scatter, which needs at least one spare
         observation.
+    strain_scale : the factor on the strain of `params0` at which the
+        data were taken, as in `solve`. The fitted `ups_g` and `ups_e`
+        are the unscaled values, so `params` reproduces the data at this
+        strain_scale; since 0.10.0 a value other than 1 is written into
+        its `reference`.
 
     Returns a `SpinFit`. Refuses -- with an explanation -- designs that
     cannot identify the varied parameters, too few points, or a fit
@@ -446,11 +454,16 @@ def fit_spin_parameters(kinds, b_fields_t, values_ghz, params0,
         chi2, chi2_dof = c, n - p
 
     fitted = _replace(params0, vary, x)
+    # since 0.10.0 the reference also records a strain_scale other than
+    # 1: the fitted strain is the one that, multiplied by it, matches
+    # the data, so the set reproduces the data only at that scale
+    scale_note = ("" if float(strain_scale) == 1.0 else
+                  f", strain_scale={float(strain_scale)!r}")
     fitted = dataclasses.replace(
         fitted,
         reference=(f"fitted by vacspin.lab.fit_spin_parameters to {n} "
-                   f"measured points (vary={','.join(vary)}); base set: "
-                   f"{params0.reference}"))
+                   f"measured points (vary={','.join(vary)}{scale_note}); "
+                   f"base set: {params0.reference}"))
     err = np.sqrt(np.diag(cov))
     resid = values - _model_vector(params0, vary, x, kinds, b,
                                    strain_scale)
@@ -492,13 +505,16 @@ def propagate_uncertainty(fit, func, rel_step: float = 1e-6) -> dict:
     Since 0.7.0 `fit` can also be a `ReadoutFit` from
     `fit_readout_histograms`. `func` then receives a dict with the keys
     "eta", "lam" and "noise_rate" (the fitted values of the varied
-    parameters and the held values of the others), for example
+    parameters and the held values of the others; since 0.10.0 also
+    "prep_error_bright" and "prep_error_dark" when the fit has them),
+    for example
     ``lambda v: vacspin.fidelity(v["eta"], v["lam"], gamma, tau, s,
     noise_rate=v["noise_rate"])["fidelity"]`` for the fidelity of a
     window you have not measured. The step is relative to the value
     (or to the error bar when that is larger); it is one-sided only
-    where the other side leaves the model's range (eta above 1, or
-    lam or noise_rate at or below 0). The fidelity is the larger of
+    where the other side leaves the model's range (eta above 1, lam or
+    noise_rate at or below 0, or a preparation error below 0 or at
+    0.5 or above). The fidelity is the larger of
     smooth curves (one per threshold), so at a window where two
     thresholds tie its slope jumps; the propagated error bar is then
     that of one side.
@@ -609,11 +625,20 @@ def design_fields(kinds, b_fields_t, n_pick, params,
     Returns dict(indices, fisher, condition_number, sigma) with the
     chosen candidate indices in pick order and the same fields as
     `parameter_information` for the chosen set. Refuses when even the
-    full candidate list cannot identify the varied parameters.
+    full candidate list cannot identify the varied parameters, and
+    (since 0.10.0) an `n_pick` that is not a whole number.
     """
     kinds, b, _, sig, vary = _check_inputs(
         kinds, b_fields_t, None, sigmas_ghz, vary)
     n, p = len(kinds), len(vary)
+    # a whole number of points (since 0.10.0; before, 2.9 picked 2)
+    whole = (isinstance(n_pick, numbers.Real)
+             and not isinstance(n_pick, bool)
+             and math.isfinite(float(n_pick))
+             and float(n_pick) == math.floor(float(n_pick)))
+    if not whole:
+        raise ValueError(f"n_pick must be a whole number of points (got "
+                         f"{n_pick!r})")
     n_pick = int(n_pick)
     if not p <= n_pick <= n:
         raise ValueError(f"n_pick must be between {p} (the number of "
@@ -723,6 +748,11 @@ def load_observations_csv(path):
 # ---------------------------------------------------------------------------
 
 _READOUT_VARY = ("eta", "lam", "noise_rate")
+# failed spin preparations (since 0.10.0): the share of the bright
+# histogram's shots that started dark, and of the dark histogram's
+# shots that started bright
+_PREP_NAMES = ("prep_error_bright", "prep_error_dark")
+_PREP_MAX = 0.5
 _MIN_SHOTS = 10
 _POOL_MIN_EXPECTED = 5.0
 _MAX_REL_SIGMA = 0.25
@@ -734,7 +764,10 @@ class ReadoutFit:
 
     values : all three parameters by name ("eta", "lam",
         "noise_rate"): the fitted values of the varied ones and the
-        held values of the others.
+        held values of the others. Since 0.10.0 also
+        "prep_error_bright" and "prep_error_dark", but only when the
+        fit varied them or was given their value (so a fit without them
+        has the same three keys as before).
     sigma : 1-sigma uncertainty of each VARIED parameter, by name.
     cov : covariance matrix of the varied parameters, in `vary` order.
     vary : the varied names, in order.
@@ -748,6 +781,11 @@ class ReadoutFit:
         dark histogram was given).
     condition_number : of the scale-free information matrix.
     n_iter : iterations used.
+    f0 : (property, since 0.10.0) the preparation factor that the fitted
+        preparation errors give, 1 - prep_error_bright - prep_error_dark
+        (1 when neither is in `values`). Passed as `f0` to `fidelity`,
+        it turns the fidelity of the readout alone into the fidelity
+        your experiment measures with these preparations.
     """
 
     values: dict
@@ -762,6 +800,21 @@ class ReadoutFit:
     n_dark_shots: int
     condition_number: float
     n_iter: int
+
+    @property
+    def f0(self) -> float:
+        """1 - prep_error_bright - prep_error_dark (since 0.10.0).
+
+        With a share e_b of the bright shots that started dark and a
+        share e_d of the dark shots that started bright, the fidelity
+        averaged over the two preparations is
+        f0 F + (1 - f0) / 2 with f0 = 1 - e_b - e_d, where F is the
+        fidelity of the readout alone. That is exactly how `fidelity`
+        and `fidelity_four_level` apply `f0`. Its error bar:
+        ``propagate_uncertainty(fit, lambda v: 1 - v["prep_error_bright"]
+        - v["prep_error_dark"])``."""
+        return (1.0 - float(self.values.get("prep_error_bright", 0.0))
+                - float(self.values.get("prep_error_dark", 0.0)))
 
 
 def _convolve_positive(p, q, n):
@@ -937,7 +990,10 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
                            lam: Optional[float] = None,
                            noise_rate: Optional[float] = None,
                            leak: float = 0.0, vary=("eta", "lam"),
-                           max_iter: int = 200) -> ReadoutFit:
+                           max_iter: int = 200,
+                           prep_error_bright: Optional[float] = None,
+                           prep_error_dark: Optional[float] = None
+                           ) -> ReadoutFit:
     """Fit the readout model to your measured photon-count histograms.
 
     In a single-shot readout experiment you prepare the bright spin
@@ -969,7 +1025,22 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
         given; a fixed `noise_rate` left at None means no background.
     leak : the dark spin's off-resonant scattering ratio, held fixed
         (default 0; see `fidelity`).
-    vary : which of "eta", "lam", "noise_rate" to fit.
+    vary : which of "eta", "lam", "noise_rate", "prep_error_bright"
+        and "prep_error_dark" to fit.
+    prep_error_bright, prep_error_dark : (new in 0.10.0) failed spin
+        preparations. prep_error_bright is the share of the bright
+        histogram's shots in which the spin started dark, and
+        prep_error_dark the share of the dark histogram's shots in
+        which it started bright. Such a shot gives the counts of the
+        other spin state, so the bright histogram is fitted with
+        (1 - e_b) P_bright + e_b P_dark and the dark histogram with
+        (1 - e_d) P_dark + e_d P_bright. Each must lie in [0, 0.5) (a
+        larger share would swap the labels). Left at None and not in
+        `vary`, it is not modeled (as before 0.10.0). A varied one left
+        at None starts from a one-dimensional likelihood scan with the
+        other starting values; varying prep_error_dark needs
+        `dark_hist`. `ReadoutFit.f0` then gives the matching `f0` for
+        `fidelity`.
 
     Method: Fisher scoring on the exact log-likelihood (the expected
     information matrix with central-difference derivatives of the
@@ -992,7 +1063,11 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
     quarter of its value (the likelihood is then too lopsided for
     large-sample error bars to be reliable); a best fit at the
     boundary eta = 1 (the counts exceed what gamma, s and tau allow);
-    and a fit that does not converge (`RuntimeError`).
+    and a fit that does not converge (`RuntimeError`). Since 0.10.0
+    also: a preparation error outside [0, 0.5) or not a number, a
+    varied one that starts at 0 or runs to 0 during the fit (the
+    histograms show no failed preparations: hold it at 0), and a varied
+    prep_error_dark without a dark histogram.
     """
     hb = _as_histogram(bright_hist, "bright_hist")
     hd = None if dark_hist is None else _as_histogram(dark_hist,
@@ -1001,11 +1076,30 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
     if len(vary) == 0:
         raise ValueError("vary must name at least one parameter")
     for name in vary:
-        if name not in _READOUT_VARY:
+        if name not in _READOUT_VARY + _PREP_NAMES:
             raise ValueError(f"cannot vary {name!r}; choose from "
-                             f"{_READOUT_VARY}")
+                             f"{_READOUT_VARY + _PREP_NAMES}")
     if len(set(vary)) != len(vary):
         raise ValueError("vary contains a repeated name")
+    prep = {}
+    for name, v in zip(_PREP_NAMES, (prep_error_bright, prep_error_dark)):
+        if v is not None:
+            ok = (isinstance(v, numbers.Real) and not isinstance(v, bool)
+                  and math.isfinite(float(v))
+                  and 0.0 <= float(v) < _PREP_MAX)
+            if not ok:
+                raise ValueError(f"{name} must be a number in [0, "
+                                 f"{_PREP_MAX:g}) (got {v!r})")
+            v = float(v)
+            if name in vary and v <= 0.0:
+                raise ValueError(f"a varied {name} must start above 0; "
+                                 "to fit without it, hold it fixed at 0")
+        if name in vary or v is not None:
+            prep[name] = v
+    if "prep_error_dark" in vary and hd is None:
+        raise ValueError("prep_error_dark is the share of the dark "
+                         "histogram's shots that started bright; fitting "
+                         "it needs dark_hist")
     for name, v in (("eta", eta), ("lam", lam)):
         if v is None and name not in vary:
             raise ValueError(f"{name} is held fixed, so give its value")
@@ -1030,12 +1124,29 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
 
     def valid(x):
         d = unpack(x)
-        return (0.0 < d["eta"] <= 1.0 and d["lam"] > 0.0
-                and np.isfinite(d["lam"]) and d["noise_rate"] >= 0.0
-                and (d["noise_rate"] > 0.0 or "noise_rate" not in vary)
-                and np.isfinite(d["noise_rate"]))
+        ok = (0.0 < d["eta"] <= 1.0 and d["lam"] > 0.0
+              and np.isfinite(d["lam"]) and d["noise_rate"] >= 0.0
+              and (d["noise_rate"] > 0.0 or "noise_rate" not in vary)
+              and np.isfinite(d["noise_rate"]))
+        for name in prep:
+            v = d[name]
+            ok = ok and np.isfinite(v) and 0.0 <= v < _PREP_MAX \
+                and (v > 0.0 or name not in vary)
+        return bool(ok)
 
     def pmfs(x):
+        """Both pmfs as fitted to the two histograms: the count model,
+        mixed with the other spin state's counts by the preparation
+        errors (when they are modeled and not zero)."""
+        pb, pd = components(x)
+        d = unpack(x)
+        e_b = d.get("prep_error_bright", 0.0)
+        e_d = d.get("prep_error_dark", 0.0)
+        if e_b == 0.0 and e_d == 0.0:
+            return pb, pd
+        return (1.0 - e_b) * pb + e_b * pd, (1.0 - e_d) * pd + e_d * pb
+
+    def components(x):
         """Both pmfs to a count beyond which less than 1e-9 remains."""
         d = unpack(x)
         gp = r / (1.0 + d["lam"])
@@ -1107,10 +1218,41 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
             u += g[:, :m_k][:, seen] @ (h[:m_k][seen] / pk[:m_k][seen])
         return u, info, (pb, pd)
 
+    full.update({k: (0.0 if v is None else v) for k, v in prep.items()})
+    unset = [k for k, v in prep.items() if v is None]
+    if unset:
+        # start each varied preparation error left at None at the best
+        # point of a scan of its histogram's likelihood, with the other
+        # parameters at their starting values (for fixed count
+        # distributions that likelihood is concave in the share)
+        pb0, pd0 = components(np.array([full[k] for k in vary]))
+        grid = np.geomspace(1e-3, 0.45, 61)
+        for name in unset:
+            h, own, other = ((hb, pb0, pd0) if name == "prep_error_bright"
+                             else (hd, pd0, pb0))
+            nz = h > 0
+            o, t = own[:h.size][nz], other[:h.size][nz]
+            with np.errstate(divide="ignore"):
+                lls = [float(np.sum(h[nz] * np.log((1.0 - e) * o + e * t)))
+                       for e in grid]
+            full[name] = float(grid[int(np.argmax(lls))])
+
     x = np.array([full[k] for k in vary], dtype=float)
     pb, pd = pmfs(x)
     ll = loglik(pb, pd)
     if not np.isfinite(ll):
+        def impossible(h, p):
+            return h is not None and bool(np.any(p[:h.size][h > 0] <= 0.0))
+        if (impossible(hd, pd) and not impossible(hb, pb)
+                and full["noise_rate"] == 0.0 and leak == 0.0):
+            # (before 0.10.0 this case got the message below, which
+            # blamed the bright starting values)
+            raise ValueError(
+                "the dark histogram has shots with counts, but the model "
+                "gives the dark spin zero probability of any count: the "
+                "background is held at 0 (a fixed noise_rate left at None "
+                "means no background) and leak = 0. Give noise_rate, and "
+                "add it to vary to fit it")
         gp0 = r / (1.0 + full["lam"])
         m_model = (full["eta"] * (full["lam"] + 1.0)
                    * (-math.expm1(-gp0 * tau)) + full["noise_rate"] * tau)
@@ -1158,6 +1300,14 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
         dx = x_new - x
         gain = ll_new - ll
         x, ll = x_new, ll_new
+        at_zero = [k for k, v in zip(vary, x)
+                   if k in _PREP_NAMES and v < 1e-6]
+        if at_zero:
+            raise ValueError(
+                f"poorly determined: {at_zero[0]} runs to its lower limit "
+                "0 (below 1e-6), where large-sample error bars do not "
+                "apply: these histograms show no failed preparations. "
+                "Hold it fixed at 0")
         u, info, _ = score_info(x)
         # converged when the step is negligible, or when both the step
         # and the likelihood gain are at the round-off level
@@ -1187,7 +1337,8 @@ def fit_readout_histograms(bright_hist, gamma: float, tau: float,
             "quarter of the value, the likelihood is too lopsided for "
             "large-sample error bars to be reliable. Hold that "
             "parameter fixed, or collect more shots (for lam: use a "
-            "window with more spin flips, tau near (lam + 1) / R)")
+            "window with more spin flips, tau near (lam + 1) / R; for a "
+            "preparation error close to 0: hold it fixed at 0)")
     # goodness of fit
     pb, pd = pmfs(x)
     chi2, bins = _pooled_pearson(hb, pb)
@@ -1216,6 +1367,8 @@ def _readout_in_range(name, v):
         return 0.0 < v <= 1.0
     if name == "lam":
         return v > 0.0
+    if name in _PREP_NAMES:
+        return 0.0 <= v < _PREP_MAX
     return v >= 0.0                                  # noise_rate
 
 

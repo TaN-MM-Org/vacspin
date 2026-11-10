@@ -39,7 +39,7 @@ from .lab import (LifetimeFit, ReadoutFit, SpinFit, design_fields,
                   parameter_information, propagate_uncertainty,
                   save_observations_csv)
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",
