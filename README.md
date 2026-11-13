@@ -1983,8 +1983,9 @@ design (FEM/EME/GME electromagnetic simulations) and reproduces the specific stu
 
 > T. M. Mahim, M. M. Rahman and A. S. M. Mohsin, "Fast single-shot
 > readout of tin-vacancy spins with an overcoupled diamond nanocavity
-> on thin-film lithium niobate" (submitted to Optics Express, 2026;
-> revised manuscript); pipeline:
+> on thin-film lithium niobate," Optics Express (2026),
+> https://doi.org/10.1364/OE.618386 (accepted 5 November 2026; volume
+> and pages to be assigned); pipeline:
 > https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface;
 > data: https://doi.org/10.5281/zenodo.23507013
 
