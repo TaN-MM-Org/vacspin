@@ -8,7 +8,7 @@ branching ratio eta_BR (their Eq. 3), and the polarization overlap of
 the dipole with the cavity field (their Eqs. 6-10). The quantum
 efficiency eta_q, the ideal Purcell factor F_max and the position
 overlap are added as in the SnV-on-TFLN study of Mahim et al.
-(submitted to Optics Express, 2026; revised manuscript, data
+(Optics Express (2026), doi:10.1364/OE.618386; data
 doi:10.5281/zenodo.23507013):
 
     F_max = (3 / 4 pi^2) (lam/n)^3 Q_L / V         ideal Purcell factor
