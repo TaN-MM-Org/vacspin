@@ -4,9 +4,10 @@ model, and the revised source study.
 
 Source study: T. M. Mahim, M. M. Rahman and A. S. M. Mohsin, "Fast
 single-shot readout of tin-vacancy spins with an overcoupled diamond
-nanocavity on thin-film lithium niobate", revised manuscript (submitted
-to Optics Express, 2026); code Tanvir-Mahmud-Mahim/snv-tfln-cavity-
-interface (commit c83302e), data doi:10.5281/zenodo.23507013.
+nanocavity on thin-film lithium niobate", Optics Express (2026),
+doi:10.1364/OE.618386, revised manuscript; code
+Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface (commit c83302e), data
+doi:10.5281/zenodo.23507013.
 
 The "study code" values below were computed by running that commit's
 sim/readout_fcs.py (with its own qutip-based Hamiltonian, sim/snv.py)

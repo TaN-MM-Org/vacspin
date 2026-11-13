@@ -2,9 +2,10 @@
 
 T. M. Mahim, M. M. Rahman and A. S. M. Mohsin, "Fast single-shot
 readout of tin-vacancy spins with an overcoupled diamond nanocavity on
-thin-film lithium niobate", revised manuscript (revision 1, submitted
-to Optics Express, 2026); code: Tanvir-Mahmud-Mahim/snv-tfln-cavity-
-interface; data: doi:10.5281/zenodo.23507013.
+thin-film lithium niobate", Optics Express (2026),
+doi:10.1364/OE.618386, revised manuscript (revision 1); code:
+Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface; data:
+doi:10.5281/zenodo.23507013.
 
 The revision moved the design point to an overcoupled cavity with
 Q_L = 870 and C-transition Purcell factor F_C = 28, and replaced the
