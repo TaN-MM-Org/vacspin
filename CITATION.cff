@@ -25,8 +25,12 @@ references:
       - family-names: Mohsin
         given-names: Abu S. M.
     journal: "Optics Express"
+    volume: 34
+    issue: 23
+    start: 45209
+    end: 45223
     year: 2026
+    month: 11
     doi: 10.1364/OE.618386
     url: "https://doi.org/10.1364/OE.618386"
-    status: in-press
-    notes: "Accepted 5 November 2026; volume and pages to be assigned. Code: https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface; data: doi:10.5281/zenodo.23507013"
+    notes: "Published 13 November 2026, open access. Code: https://github.com/Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface; data: doi:10.5281/zenodo.23507013"
