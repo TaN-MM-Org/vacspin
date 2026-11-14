@@ -10,7 +10,8 @@ study). That light is counted, but it leaves the spin dark; it switches
 the spin on only through the weak spin-flipping decay B1. The revised
 source study (Mahim, Rahman and Mohsin, "Fast single-shot readout of
 tin-vacancy spins with an overcoupled diamond nanocavity on thin-film
-lithium niobate", Optics Express (2026), doi:10.1364/OE.618386; code
+lithium niobate", Optics Express 34(23), 45209-45223 (2026),
+doi:10.1364/OE.618386; code
 Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface, sim/readout_fcs.py)
 therefore computes the readout from the four-level master equation.
 This module implements that model.

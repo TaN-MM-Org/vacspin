@@ -11,8 +11,8 @@ paths.
 Methodological basis: T. M. Mahim, M. M. Rahman and A. S. M. Mohsin,
 "Fast single-shot readout of tin-vacancy spins with an overcoupled
 diamond nanocavity on thin-film lithium niobate", Optics Express
-(2026), doi:10.1364/OE.618386 (accepted; volume and pages to be
-assigned; data doi:10.5281/zenodo.23507013),
+34(23), 45209-45223 (2026), doi:10.1364/OE.618386 (data
+doi:10.5281/zenodo.23507013),
 and the effective-Hamiltonian and readout formalism of
 Rosenthal et al., PRX 13, 031022 (2023) and PRX 14, 041008 (2024)
 (arXiv:2403.13110).
