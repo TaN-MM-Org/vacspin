@@ -1,8 +1,8 @@
 """End to end: the package reproduces the design point of the ORIGINAL
 SUBMISSION of the source study (Mahim, Rahman and Mohsin, Optics
-Express (2026), doi:10.1364/OE.618386; the open pipeline at
-Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface, release v1.1.1) from
-its stated inputs -- the overcoupled Q_L = 500 diamond nanocavity on
+Express 34(23), 45209-45223 (2026), doi:10.1364/OE.618386; the open
+pipeline at Tanvir-Mahmud-Mahim/snv-tfln-cavity-interface, release v1.1.1)
+from its stated inputs -- the overcoupled Q_L = 500 diamond nanocavity on
 TFLN: F_C ~ 19, end-to-end efficiency ~ 0.65, single-shot fidelity
 above 98% in a 100 ns window. The revised manuscript moved the design
 point to Q_L = 870 (F_C = 28, efficiency 32 %) with a four-level
