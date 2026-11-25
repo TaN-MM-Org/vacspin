@@ -13,7 +13,7 @@ P = snv_rosenthal2023()
 
 def test_dipole_sum_rule_exact():
     """sum_j sum_i |<e_j| p_i |g>|^2 = <g| (px^2 + py^2 + pz^2) |g> = 3
-    exactly, for every ground state, any field, any centre -- the
+    exactly, for every ground state, any field, any center -- the
     completeness of the excited manifold makes it an identity."""
     for params in (P, siv_hepp2014()):
         for b in ([0, 0, 0], [0.05, -0.02, 0.11], [0.2, 0.0, 0.0]):

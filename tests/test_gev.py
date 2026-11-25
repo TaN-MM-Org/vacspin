@@ -2,7 +2,7 @@
 (Bhaskar et al., PRL 118, 223603 (2017): 152 GHz ground, 981 GHz
 excited, measured); at zero strain the closed-form zero-field
 splitting IS the spin-orbit constant, exactly; the full solver
-reproduces both splittings; the dipole sum rule holds for this centre
+reproduces both splittings; the dipole sum rule holds for this center
 as an identity; an aligned field keeps the flip channel exactly dark
 (the same protection SnV and SiV show); and the provenance string
 carries its source and its deliberate omissions."""
