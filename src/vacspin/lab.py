@@ -1,7 +1,7 @@
 """Adapt vacspin to your own sample: plan, measure, calibrate.
 
 Every sample is different -- strain, orientation and quenching move the
-numbers -- so the parameter set that describes YOUR centre has to come
+numbers -- so the parameter set that describes YOUR center has to come
 from YOUR measurements. This module closes that loop in three steps,
 in the order a lab actually works:
 
@@ -56,7 +56,8 @@ Since 0.5.0 two more tools check a lab's own data against the model:
 Since 0.8.0 `fit_lifetime_histogram` fits the excited-state lifetime to
 a time-resolved photon histogram (Poisson maximum likelihood, constant
 background); `vacspin.purcell_from_lifetimes` turns two such lifetimes
-into the measured cavity budget.
+into the measured cavity budget. Since 0.11.0 it can also fit the decay
+convolved with a measured instrument response (`irf`).
 """
 from __future__ import annotations
 
@@ -1500,6 +1501,62 @@ def _decay_shape(edges, tau):
     return u, du
 
 
+def _irf_kernel(width, tau, m):
+    """Response of equal bins of width `width` to an excitation spread
+    evenly over one bin (since 0.11.0): K_j is the share of an
+    exponential decay (lifetime tau), started at a time spread
+    uniformly over bin 0, that falls in bin j (j = 0..m-1), and dK_j is
+    its derivative with respect to tau. With y = width / tau and
+    phi(y) = (1 - e^-y) / y,
+
+        K_0 = 1 - phi(y),
+        K_j = phi(y) (1 - e^-y) e^{-(j - 1) y}         (j >= 1),
+
+    from integrating the uniform start and the decay over each bin; the
+    K_j add up to 1. Derivatives, with dy/dtau = -y / tau:
+
+        dK_0/dy = -phi'(y),  phi'(y) = (y e^-y + e^-y - 1) / y^2,
+        dK_j/dy = K_j (2 / (e^y - 1) - 1 / y - (j - 1))   (j >= 1)."""
+    y = width / tau
+    em1 = -math.expm1(-y)                      # 1 - e^-y
+    phi = em1 / y
+    if y < 1e-3:
+        dphi = -0.5 + y / 3.0 - y * y / 8.0 + y ** 3 / 30.0
+    else:
+        dphi = (y * math.exp(-y) - em1) / (y * y)
+    j = np.arange(m, dtype=float)
+    k = np.empty(m)
+    dk_dy = np.empty(m)
+    k[0] = 1.0 - phi
+    dk_dy[0] = -dphi
+    if m > 1:
+        k[1:] = phi * em1 * np.exp(-(j[1:] - 1.0) * y)
+        dk_dy[1:] = k[1:] * (2.0 / math.expm1(y) - 1.0 / y - (j[1:] - 1.0))
+    return k, dk_dy * (-y / tau)
+
+
+def _check_irf(irf, n_bins, edges):
+    """The instrument response as a normalized 1-D array over all bins;
+    the bins must have equal widths."""
+    try:
+        h = np.asarray(irf, dtype=float)
+    except (TypeError, ValueError):
+        raise ValueError("irf must be an array of numbers") from None
+    if h.shape != (n_bins,):
+        raise ValueError("irf must be a 1-D array with one entry per bin of "
+                         "counts (the instrument response measured on the "
+                         "same bins)")
+    if not np.all(np.isfinite(h)) or np.any(h < 0.0) or not h.sum() > 0.0:
+        raise ValueError("irf entries must be finite and >= 0, with a "
+                         "positive sum")
+    widths = np.diff(edges)
+    if np.max(np.abs(widths - widths.mean())) > 1e-6 * widths.mean():
+        raise ValueError("with irf, the bins must all have the same width "
+                         "(as in a time-correlated single photon counting "
+                         "histogram)")
+    return h / h.sum()
+
+
 def _pooled_pearson_poisson(n, mu):
     """Pearson chi2 of Poisson bin counts n against their fitted means
     mu, after pooling neighboring bins (from early delays on) until each
@@ -1526,7 +1583,8 @@ def _pooled_pearson_poisson(n, mu):
 def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
                            t_start: Optional[float] = None,
                            tau_start: Optional[float] = None,
-                           max_iter: int = 200) -> LifetimeFit:
+                           max_iter: int = 200,
+                           irf=None) -> LifetimeFit:
     """Fit an excited-state lifetime to a time-resolved photon histogram.
 
     In a lifetime measurement (time-correlated single-photon counting)
@@ -1549,10 +1607,25 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
     background : fit B (default) or hold it at 0.
     t_start : fit only the bins whose left edge is at or after this
         delay (s). Start after the excitation pulse and the detector's
-        timing response have died away: this function fits the decay
-        tail and does not deconvolve an instrument response.
+        timing response have died away: without `irf` this function
+        fits the decay tail only and does not model an instrument
+        response.
     tau_start : optional starting lifetime (s); by default the start
         comes from the mean delay of the counts above the background.
+    irf : (new in 0.11.0) the instrument response, measured on the same
+        bins: one entry per bin of `counts` (any scale; it is normalized
+        to sum 1), for example the histogram of laser light scattered
+        straight into the detector. The decay is then convolved with it
+        (reconvolution), so the bins of the rise and of the response can
+        be fitted too, and `t_start` is no longer needed. The bins must
+        all have the same width. The response is taken as constant within
+        each bin, and the decay starts at a time spread evenly over that
+        bin; the expected counts are then exact (`_irf_kernel`).
+        `amplitude` is the expected number of decay counts summed to
+        infinite delay. The response must be measured with the same
+        timing as the decay: a time offset between the two is not
+        fitted, and the noise of a measured response is not carried into
+        the error bars.
 
     Method: Poisson maximum likelihood by Fisher scoring with a line
     search; error bars from the inverse of the expected information at
@@ -1570,12 +1643,20 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
     whose error bar exceeds a quarter of its value (for example a
     lifetime much shorter than one bin or much longer than the
     window), parameters the data cannot tell apart, and a fit that does
-    not converge (RuntimeError).
+    not converge (RuntimeError). Since 0.11.0 also an `irf` that is not
+    one finite, non-negative number per bin with a positive sum, bins of
+    unequal width together with `irf`, and counts before the response
+    starts when the background is held at 0.
 
-    Not modeled: the instrument response (fit from `t_start` after it),
-    pile-up (keep the detection probability per pulse small), and decay
-    left over from earlier pulses (the pulse period should be many
-    lifetimes long).
+    Not modeled: the instrument response, unless `irf` is given (else
+    fit from `t_start` after it), and pile-up (keep the detection
+    probability per pulse small). Decay left over from earlier pulses
+    does not change the fitted lifetime when every fitted bin lies
+    within one pulse period after the pulse: the leftover of pulse m
+    before is A e^{-(t + m T)/tau}, the same shape, so it only adds
+    A e^{-T/tau} / (1 - e^{-T/tau}) to `amplitude` (tested). With `irf`
+    this holds only if the leftover is negligible at the start of the
+    histogram (the pulse period many lifetimes long).
     """
     try:
         n_all = np.asarray(counts, dtype=float)
@@ -1599,6 +1680,9 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
     if not isinstance(background, (bool, np.bool_)):
         raise ValueError("background must be True or False")
     background = bool(background)
+    h_irf = None
+    if irf is not None:
+        h_irf = _check_irf(irf, n_all.size, edges_all)
     if t_start is None:
         first = 0
     else:
@@ -1617,6 +1701,13 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
         raise ValueError(f"{n.size} bins in the fitted range; at least "
                          f"{n_par + 1} are needed to fit {n_par} "
                          "parameters with a spare degree of freedom")
+    if h_irf is not None and not background:
+        onset = int(np.argmax(h_irf > 0.0))
+        if np.any(n_all[first:onset] > 0):
+            raise ValueError("there are counts before the instrument response "
+                             "starts, which a decay without background "
+                             "cannot give; fit the background, or start the "
+                             "fit later with t_start")
     n_tot = float(n.sum())
     if n_tot < _MIN_SHOTS:
         raise ValueError(f"the fitted range holds {int(n_tot)} counts; at "
@@ -1646,6 +1737,11 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
     if tau_start is None:
         mid = 0.5 * (edges[:-1] + edges[1:]) - edges[0]
         t_mean = float(np.dot(excess, mid) / excess.sum())
+        if h_irf is not None:
+            # the mean delay after the response's own mean delay
+            mid_all = 0.5 * (edges_all[:-1] + edges_all[1:]) - edges[0]
+            t_irf = float(np.dot(h_irf, mid_all))
+            t_mean = max(t_mean - t_irf, float(widths.min()))
 
         def trunc_mean(t):          # mean of an exponential cut at span
             y = span / t
@@ -1662,13 +1758,25 @@ def fit_lifetime_histogram(counts, bin_edges_s, background: bool = True,
                 lo, hi = (mid_t, hi) if trunc_mean(mid_t) < t_mean \
                     else (lo, mid_t)
             tau_s0 = math.sqrt(lo * hi)
-    a0 = max(float(excess.sum()) / max(-math.expm1(-span / tau_s0), 1e-300),
-             1.0)
+
+    def shape(tau):
+        if h_irf is None:
+            return _decay_shape(edges, tau)
+        k, dk = _irf_kernel(float(widths.mean()), tau, n_all.size)
+        u = np.convolve(h_irf, k)[first:n_all.size]
+        du = np.convolve(h_irf, dk)[first:n_all.size]
+        return u, du
+
+    if h_irf is None:
+        share0 = -math.expm1(-span / tau_s0)
+    else:
+        share0 = float(shape(tau_s0)[0].sum())
+    a0 = max(float(excess.sum()) / max(share0, 1e-300), 1.0)
     x = np.array([tau_s0, a0, b0][:n_par], dtype=float)
     seen = n > 0
 
     def model(xv):
-        u, du = _decay_shape(edges, xv[0])
+        u, du = shape(xv[0])
         mu = xv[1] * u + (xv[2] * widths if background else 0.0)
         return mu, u, du
 

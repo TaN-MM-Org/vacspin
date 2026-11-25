@@ -1,7 +1,7 @@
 """The group-IV effective Hamiltonian: 4x4 per manifold, pure NumPy.
 
 Implements the effective ground/excited-manifold Hamiltonian shared by
-all group-IV vacancy centres in diamond, exactly as written for the
+all group-IV vacancy centers in diamond, exactly as written for the
 SnV- in Rosenthal et al., Phys. Rev. X 13, 031022 (2023), Appendix B
 (Eqs. B1-B5), in the basis {|ex up>, |ex dn>, |ey up>, |ey dn>}
 (orbital doublet x spin 1/2):
@@ -16,7 +16,7 @@ SnV- in Rosenthal et al., Phys. Rev. X 13, 031022 (2023), Appendix B
 
 with all energies in GHz (angular frequency over 2 pi), fields in
 tesla, and gamma/2pi = 28.0 GHz/T the electron gyromagnetic ratio. The
-field enters in the SPIN FRAME whose z axis lies along the centre's
+field enters in the SPIN FRAME whose z axis lies along the center's
 <111> high-symmetry axis; `lab_to_spin` performs the exact rotation
 from your lab frame using the (theta, phi) of the parameter set.
 
@@ -74,7 +74,7 @@ def h_manifold(lam, ups_x, ups_y, f, delta, b_spin):
 
 def lab_to_spin(v_lab, theta_rad, phi_rad):
     """Rotate a lab-frame vector into the spin frame whose z axis
-    points along the centre's <111> axis at polar angle theta, azimuth
+    points along the center's <111> axis at polar angle theta, azimuth
     phi. Rows of the rotation are the spin-frame basis vectors in the
     lab frame; the rotation is exactly orthonormal."""
     ct, st = np.cos(theta_rad), np.sin(theta_rad)
@@ -105,6 +105,22 @@ def _check_strain_scale(strain_scale) -> float:
     return s
 
 
+def _field_vector(b, name="magnetic field"):
+    """A field as a float array of 3 components (any shape holding 3
+    numbers, such as (3,) or (3, 1)); refuses anything else, and NaN or
+    infinite components (since 0.11.0 the shape is checked too)."""
+    try:
+        v = np.asarray(b, dtype=float)
+    except (TypeError, ValueError):
+        v = None
+    if v is None or v.size != 3:
+        raise ValueError(f"{name} must be a vector (Bx, By, Bz) of three "
+                         f"numbers in tesla (got {b!r})")
+    if not np.all(np.isfinite(v)):
+        raise ValueError(f"{name} must be finite")
+    return v.reshape(3)
+
+
 def solve(params: SpinParameters, b_lab,
           strain_scale: float = 1.0) -> tuple:
     """Eigenstructure of both manifolds at a lab-frame field (tesla).
@@ -119,10 +135,11 @@ def solve(params: SpinParameters, b_lab,
     Refuses a field or a `strain_scale` that is not finite, and a
     negative `strain_scale` (since 0.7.0 a NaN or infinite
     `strain_scale` gives this ValueError instead of NumPy's
-    "Eigenvalues did not converge").
+    "Eigenvalues did not converge"). Since 0.11.0 it also refuses a
+    field that is not three numbers with a ValueError that says so
+    (before, NumPy's matmul or TypeError messages).
     """
-    if not np.all(np.isfinite(b_lab)):
-        raise ValueError("magnetic field must be finite")
+    b_lab = _field_vector(b_lab)
     s = _check_strain_scale(strain_scale)
     bs = lab_to_spin(b_lab, params.theta_rad, params.phi_rad)
     hg = h_manifold(params.lam_g, s * params.ups_g, 0.0,

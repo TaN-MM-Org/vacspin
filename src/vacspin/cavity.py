@@ -122,7 +122,7 @@ def xi_pol_overlap(theta_deg: float = _THETA_111_DEG,
 
 
 class CavityInterface:
-    """All derived quantities of one cavity-coupled colour centre.
+    """All derived quantities of one cavity-coupled color center.
 
     Parameters
     ----------

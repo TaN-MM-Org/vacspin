@@ -1,6 +1,6 @@
-"""vacspin: group-IV colour-centre spin-photon interfaces, end to end.
+"""vacspin: group-IV color-center spin-photon interfaces, end to end.
 
-From the strained spin Hamiltonian of a vacancy centre in diamond
+From the strained spin Hamiltonian of a vacancy center in diamond
 (SiV-, GeV-, SnV-, PbV-), through its optical transitions and
 cyclicity, the transition-resolved Purcell budget of a coupled
 cavity, to exact single-shot readout statistics and remote-
@@ -40,7 +40,7 @@ from .lab import (LifetimeFit, ReadoutFit, SpinFit, design_fields,
                   parameter_information, propagate_uncertainty,
                   save_observations_csv)
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 __all__ = [
     "SpinParameters", "EmissionBudget", "snv_rosenthal2023",
     "snv_emission", "siv_hepp2014", "gev_bhaskar2017",

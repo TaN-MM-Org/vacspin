@@ -1,12 +1,12 @@
-"""Cited parameter sets for group-IV colour-centre spin-photon interfaces.
+"""Cited parameter sets for group-IV color-center spin-photon interfaces.
 
 No physical number in this package is made up, and none is accepted
 without a source: both dataclasses refuse to exist without a
-`reference`. Three centres ship (SnV-, SiV-, GeV-), and each ships only
+`reference`. Three centers ship (SnV-, SiV-, GeV-), and each ships only
 what its source states:
 
 * `snv_rosenthal2023` / `snv_emission`: the negatively charged
-  tin-vacancy (SnV-) centre in diamond, the device-fit values of
+  tin-vacancy (SnV-) center in diamond, the device-fit values of
   Table I of J. A. Rosenthal et al., Phys. Rev. X 13, 031022 (2023)
   (arXiv:2306.13199), with the ab initio orbital-quenching reduction
   factors of G. Thiering and A. Gali, Phys. Rev. X 8, 021063 (2018),
@@ -17,7 +17,7 @@ what its source states:
   branching ratio of Lee et al., arXiv:2511.05740. This set is validated against measured numbers in
   the test suite (zero-field splittings, qubit frequency, cyclicity,
   Rabi rate) with no free parameters.
-* `siv_hepp2014`: the silicon-vacancy (SiV-) centre, unstrained
+* `siv_hepp2014`: the silicon-vacancy (SiV-) center, unstrained
   spin-orbit splittings of C. Hepp et al., Phys. Rev. Lett. 112,
   036405 (2014) (arXiv:1310.3106): 50 GHz ground, 260 GHz excited,
   737 nm zero-phonon line. Strain and orbital quenching are
@@ -26,7 +26,7 @@ what its source states:
   string, and you supply your measured values for field-dependent
   work.
 
-* `gev_bhaskar2017`: the germanium-vacancy (GeV-) centre, measured
+* `gev_bhaskar2017`: the germanium-vacancy (GeV-) center, measured
   orbital splittings of M. K. Bhaskar et al., Phys. Rev.
   Lett. 118, 223603 (2017) (arXiv:1612.03036): 152 GHz ground,
   981 GHz excited, 602 nm zero-phonon line. As for SiV-, strain and
@@ -36,7 +36,7 @@ what its source states:
   -- which is exactly why); supply your measured values, or fit them
   with `vacspin.lab`.
 
-The lead-vacancy (PbV-) centre is documented but NOT shipped, on
+The lead-vacancy (PbV-) center is documented but NOT shipped, on
 purpose: its ground-state splitting is measured (about 3900 GHz;
 P. Wang et al., ACS Photonics 8, 2947 (2021), arXiv:2106.03413,
 confirmed by Chen et al., arXiv:2605.27841 (2026)), but no verified
@@ -44,7 +44,7 @@ measured excited-state splitting was available to this package's
 maintainers, and this package does not ship half a parameter set.
 Populate `SpinParameters` yourself when your sample's numbers exist.
 
-For any other centre, or your own sample of any centre, populate the
+For any other center, or your own sample of any center, populate the
 dataclasses from your measurements or the literature; the mandatory
 `reference` field keeps the provenance attached to every prediction.
 """
@@ -67,9 +67,9 @@ def _check_ref(reference):
 
 @dataclasses.dataclass(frozen=True)
 class SpinParameters:
-    """Effective-Hamiltonian parameters of one group-IV centre.
+    """Effective-Hamiltonian parameters of one group-IV center.
 
-    All group-IV vacancy centres (SiV-, GeV-, SnV-, PbV-) share the
+    All group-IV vacancy centers (SiV-, GeV-, SnV-, PbV-) share the
     same D3d level structure: an orbital doublet times spin 1/2 in
     each manifold, split by spin-orbit coupling and strain. Units:
     every energy in GHz (angular frequency over 2 pi), fields in
@@ -80,7 +80,7 @@ class SpinParameters:
         strain axis fixes the azimuthal origin of the spin frame).
     f_g, f_e : orbital Zeeman quenching factors (gL * p).
     delta_g, delta_e : spin g-factor anisotropies (gL * delta_p).
-    theta_rad, phi_rad : polar and azimuthal angle of the centre's
+    theta_rad, phi_rad : polar and azimuthal angle of the center's
         high-symmetry <111> axis in your lab frame.
     reference : where every number comes from. Required, on purpose.
     """
@@ -121,7 +121,7 @@ class SpinParameters:
 
 @dataclasses.dataclass(frozen=True)
 class EmissionBudget:
-    """Optical emission budget of one centre (bulk values).
+    """Optical emission budget of one center (bulk values).
 
     tau0_s : total excited-state lifetime (s).
     eta_q : radiative quantum efficiency in [0, 1].
@@ -233,7 +233,7 @@ def gev_bhaskar2017(theta_rad=None, phi_rad=None) -> SpinParameters:
     or fit them from your own frequencies with `vacspin.lab`. Default
     orientation: the <111> axis of a (001)-oriented sample, exact
     crystallography, overridable. Millisecond-scale coherence at
-    millikelvin temperatures is measured for this centre (Senkalla et
+    millikelvin temperatures is measured for this center (Senkalla et
     al., PRL 132, 026901 (2024): 24.1 ms CPMG below 300 mK)."""
     if theta_rad is None:
         theta_rad = float(np.arccos(1.0 / np.sqrt(3.0)))

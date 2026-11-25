@@ -13,7 +13,7 @@ doublet (Eq. B15) -- the number that decides how many photons a spin
 can emit before it flips, and therefore everything about readout.
 
 Exact structure the tests lean on: for a field exactly along the
-centre's <111> axis the spin-flip strength vanishes and the cyclicity
+center's <111> axis the spin-flip strength vanishes and the cyclicity
 diverges (spin is a good quantum number); tilting the field switches
 the flip channel on. The shipped SnV- set reproduces the measured
 cyclicity landscape of Rosenthal et al., arXiv:2403.13110 (2244 near
@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .hamiltonian import GAMMA_GHZ_PER_T, h_manifold, lab_to_spin, solve
+from .hamiltonian import (GAMMA_GHZ_PER_T, _field_vector, h_manifold,
+                          lab_to_spin, solve)
 from .params import SpinParameters
 
 __all__ = ["transition_strength", "transition_table", "cyclicity",
@@ -93,15 +94,24 @@ def field_from_axis(params: SpinParameters, b_mag_t: float,
 def field_on_circle(zeta_deg, b_mag_t, plane="xz"):
     """Lab-frame field of magnitude b_mag_t swept on a great circle:
     plane='xz' gives B = |B| (cos zeta, 0, sin zeta) (the magnet sweep
-    of Rosenthal et al.); 'xy' and 'yz' are the other two planes."""
-    z = np.deg2rad(float(zeta_deg))
+    of Rosenthal et al.); 'xy' and 'yz' are the other two planes.
+
+    Since 0.11.0 it refuses a NaN or infinite angle and a field size
+    that is negative or not finite, as `field_from_axis` does (before,
+    a NaN angle gave a NaN field and a negative size the field pointing
+    the other way)."""
+    zeta, b_mag = float(zeta_deg), float(b_mag_t)
+    if not (np.isfinite(zeta) and np.isfinite(b_mag) and b_mag >= 0.0):
+        raise ValueError("b_mag_t must be finite and >= 0, and zeta_deg "
+                         "finite")
+    z = np.deg2rad(zeta)
     c, s = np.cos(z), np.sin(z)
     if plane == "xz":
-        return float(b_mag_t) * np.array([c, 0.0, s])
+        return b_mag * np.array([c, 0.0, s])
     if plane == "xy":
-        return float(b_mag_t) * np.array([c, s, 0.0])
+        return b_mag * np.array([c, s, 0.0])
     if plane == "yz":
-        return float(b_mag_t) * np.array([0.0, c, s])
+        return b_mag * np.array([0.0, c, s])
     raise ValueError('plane must be "xz", "xy" or "yz"')
 
 
@@ -179,7 +189,7 @@ def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
     for the drive too. For the SnV- set this changes the rate by a few
     percent for typical drive directions, and by more for a drive
     along the symmetry axis (see the README). Which form describes
-    your device is a modelling choice; the default keeps the published
+    your device is a modeling choice; the default keeps the published
     one.
 
     Since 0.7.0 a drive field with a NaN or infinite component is
@@ -191,13 +201,11 @@ def rabi_rate(params: SpinParameters, b_lab, b_drive_lab,
     refused: the two qubit states, and so
     the Rabi rate, are then set by round-off (at 1e-15 T the rate came
     out 2.5 MHz, where the weak-field limit is 5.9 MHz)."""
-    drive = np.asarray(b_drive_lab, dtype=float)
-    if not np.all(np.isfinite(drive)):
-        raise ValueError("b_drive_lab must be a finite lab-frame field "
-                         "vector (Bx, By, Bz) in tesla")
+    drive = _field_vector(b_drive_lab, "b_drive_lab (the lab-frame drive "
+                          "field)")
     eg, vg, ee, ve = solve(params, b_lab, strain_scale)
     _require_split(eg, 0, "qubit (lowest ground)", "Rabi rate")
-    bs = lab_to_spin(b_drive_lab, params.theta_rad, params.phi_rad)
+    bs = lab_to_spin(drive, params.theta_rad, params.phi_rad)
     if full_zeeman:
         h_mw = h_manifold(0.0, 0.0, 0.0, params.f_g, params.delta_g, bs)
     else:

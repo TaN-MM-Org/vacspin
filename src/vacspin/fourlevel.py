@@ -72,8 +72,10 @@ splittings (all four lines see the same Purcell factor), and `gamma`
 is the total decay rate of the excited states with the cavity
 (`CavityInterface.gamma_cav`, with `include_d_line=True` to count the
 D line as the source study does). The D-line photons themselves are
-counted through `eta` like the others. Spin relaxation in the ground
-state (T1) and charge-state jumps are not modeled.
+counted through `eta` like the others. Since 0.11.0 spin relaxation in
+the ground state (T1) can be added (`t1_s`): jumps between |dn> and
+|up> at the rate 1 / (2 T1) each way, which emit no photon.
+Charge-state jumps are not modeled.
 
 Validated in tests/test_fourlevel.py against: the closed-form excited
 population of a resonantly driven two-level emitter (Torrey), whose
@@ -195,10 +197,28 @@ def _check_inputs(gamma, eta, tau, s, noise_rate, extra_width_hz,
         raise ValueError("laser_detuning_hz must be finite")
 
 
-def _superoperators(s_ge, w_q, w_e, gamma, sat, gphi, d_l):
-    """L0 (everything but the jumps) and J (the sum of the jump terms),
-    column-stacking convention vec(X rho Y) = (Y^T kron X) vec(rho).
-    Units: frequencies in GHz, rates in 1/ns."""
+def _relax_rate_ns(t1_s):
+    """The relaxation rate 1 / (2 T1) in each direction, in 1/ns (0 for
+    t1_s None); refuses a T1 that is not positive and finite."""
+    if t1_s is None:
+        return 0.0
+    ok = isinstance(t1_s, numbers.Real) and not isinstance(t1_s, bool)
+    if ok:
+        t1 = float(t1_s)
+        ok = np.isfinite(t1) and t1 > 0.0
+    if not ok:
+        raise ValueError("t1_s must be None or a positive, finite spin "
+                         f"relaxation time in seconds (got {t1_s!r})")
+    return 0.5 / (t1 * 1e9)
+
+
+def _superoperators(s_ge, w_q, w_e, gamma, sat, gphi, d_l, relax=0.0):
+    """L0 (everything but the counted jumps) and J (the sum of the
+    counted jump terms), column-stacking convention
+    vec(X rho Y) = (Y^T kron X) vec(rho). Units: frequencies in GHz,
+    rates in 1/ns. relax (since 0.11.0) is the ground-state spin
+    relaxation rate in each direction, |dn> to |up> and back; its jumps
+    emit no photon, so they belong to L0."""
     d = 4
     two_pi = 2.0 * np.pi
     g2 = gamma / 2.0 + gphi
@@ -231,6 +251,13 @@ def _superoperators(s_ge, w_q, w_e, gamma, sat, gphi, d_l):
         cdc = c.T @ c
         l0 += (np.kron(c, c) - 0.5 * np.kron(eye, cdc)
                - 0.5 * np.kron(cdc.T, eye))
+    if relax > 0.0:
+        for g_from, g_to in ((0, 1), (1, 0)):
+            c = np.zeros((d, d))
+            c[g_to, g_from] = np.sqrt(relax)
+            cdc = c.T @ c
+            l0 += (np.kron(c, c) - 0.5 * np.kron(eye, cdc)
+                   - 0.5 * np.kron(cdc.T, eye))
     return l0, jump
 
 
@@ -283,11 +310,13 @@ def _range_for(mu):
             return None
 
 
-def _pmfs(s_ge, w_q, w_e, gamma, eta, sat, tau, noise, gphi, d_l, n):
+def _pmfs(s_ge, w_q, w_e, gamma, eta, sat, tau, noise, gphi, d_l, n,
+          relax=0.0):
     """Count distributions (bright, dark) on 0..n-1 by inverting the
     generating function at n points of the unit circle (in batches of
     _CHUNK points, to bound the memory)."""
-    l0, jump = _superoperators(s_ge, w_q, w_e, gamma, sat, gphi, d_l)
+    l0, jump = _superoperators(s_ge, w_q, w_e, gamma, sat, gphi, d_l,
+                               relax)
     z = np.exp(2j * np.pi * np.arange(n) / n)
     vec_i = np.eye(4).reshape(-1, order="F")
     g_b = np.empty(n, dtype=complex)
@@ -311,7 +340,8 @@ def four_level_counts(cline: CLine, gamma: float, eta: float, tau: float,
                       s: float = 1.0, noise_rate: float = 0.0,
                       extra_width_hz: float = 0.0,
                       spectral_diffusion_hz: float = 0.0,
-                      laser_detuning_hz: float = 0.0):
+                      laser_detuning_hz: float = 0.0,
+                      t1_s: Optional[float] = None):
     """Exact detected-count distributions of the four-level model.
 
     cline : `CLine` from `c_line`.
@@ -329,6 +359,13 @@ def four_level_counts(cline: CLine, gamma: float, eta: float, tau: float,
         evaluation, so a diffusion much wider than the optical line is
         slow.
     laser_detuning_hz : fixed laser detuning from A1 (Hz).
+    t1_s : (new in 0.11.0) spin relaxation time T1 of the ground state
+        (s), or None (default) for none. It adds jumps |dn> -> |up> and
+        |up> -> |dn>, each at the rate 1 / (2 T1), which emit no photon;
+        the populations of a spin left alone then relax towards 1/2 each
+        at the rate 1 / T1. As in `vacspin.fidelity`, equal rates in
+        both directions hold when the temperature is well above
+        h f_q / k_B.
 
     Returns (pmf_bright, pmf_dark): arrays over 0, 1, 2, ... counts for
     a spin prepared in |dn> and in |up>, each summing to 1 within 1e-8.
@@ -336,6 +373,7 @@ def four_level_counts(cline: CLine, gamma: float, eta: float, tau: float,
     s_ge = _check_cline(cline)
     _check_inputs(gamma, eta, tau, s, noise_rate, extra_width_hz,
                   spectral_diffusion_hz, laser_detuning_hz)
+    relax = _relax_rate_ns(t1_s)
     g_ns = float(gamma) * 1e-9
     t_ns = float(tau) * 1e9
     noise_ns = float(noise_rate) * 1e-9
@@ -352,7 +390,7 @@ def four_level_counts(cline: CLine, gamma: float, eta: float, tau: float,
 
     def at(dl):
         return _pmfs(s_ge, cline.w_q_ghz, cline.w_e_ghz, g_ns, float(eta),
-                     float(s), t_ns, noise_ns, gphi, dl, n)
+                     float(s), t_ns, noise_ns, gphi, dl, n, relax)
 
     if spectral_diffusion_hz > 0.0:
         sig = float(spectral_diffusion_hz) * 1e-9 / (
@@ -403,7 +441,8 @@ def fidelity_four_level(cline: CLine, gamma: float, eta: float,
                         extra_width_hz: float = 0.0,
                         spectral_diffusion_hz: float = 0.0,
                         laser_detuning_hz: float = 0.0,
-                        threshold: Optional[int] = None) -> dict:
+                        threshold: Optional[int] = None,
+                        t1_s: Optional[float] = None) -> dict:
     """Single-shot readout fidelity from the four-level count
     distributions of `four_level_counts` (same inputs).
 
@@ -428,7 +467,7 @@ def fidelity_four_level(cline: CLine, gamma: float, eta: float,
                          f"whole number of counts >= 1 (got {threshold!r})")
     p_b, p_d = four_level_counts(cline, gamma, eta, tau, s, noise_rate,
                                  extra_width_hz, spectral_diffusion_hz,
-                                 laser_detuning_hz)
+                                 laser_detuning_hz, t1_s)
     k = np.arange(p_b.size)
     cdf_b = np.cumsum(p_b)
     cdf_d = np.cumsum(p_d)
