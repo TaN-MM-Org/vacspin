@@ -4,13 +4,13 @@
 
 `vacspin` is a Python package for working out how well a single
 electron spin trapped in diamond can be read out with light and linked
-to another spin. The spin sits in a **group-IV vacancy colour centre**:
+to another spin. The spin sits in a **group-IV vacancy color center**:
 a tin, silicon, germanium or lead atom next to a missing carbon atom
-(written SnV-, SiV-, GeV-, PbV-). Such a centre can store one quantum
+(written SnV-, SiV-, GeV-, PbV-). Such a center can store one quantum
 bit and send it out as a photon, which is why it is studied as a node
 of a quantum network.
 
-Starting from the numbers that describe one centre, and the cavity and
+Starting from the numbers that describe one center, and the cavity and
 optics around it, the package answers questions such as:
 
 - At a given magnetic field, what is the qubit frequency, and how many
@@ -23,10 +23,10 @@ optics around it, the package answers questions such as:
   need?
 - How often would two such nodes become entangled?
 - From your own measured frequencies, what are the parameters of *your*
-  centre, with error bars -- and will a planned set of measurements be
+  center, with error bars -- and will a planned set of measurements be
   able to determine them at all?
 - With those error bars, how uncertain is any number predicted from
-  the fitted centre (a qubit frequency at a new field, a cyclicity)?
+  the fitted center (a qubit frequency at a new field, a cyclicity)?
 - From your own single-shot photon-count histograms, what are the
   detection efficiency, cyclicity and background of your setup, with
   error bars, and does the model describe the data at all?
@@ -41,6 +41,11 @@ optics around it, the package answers questions such as:
   four-level model, new in 0.9.0.)
 - In how many of your shots did the spin start in the wrong state, and
   how much of your measured fidelity does that cost? (New in 0.10.0.)
+- What is the readout fidelity when the spin can turn bright and dark
+  several times in one window, through off-resonant excitation or
+  spin relaxation (T1)? (New in 0.11.0.)
+- What is the lifetime, from a histogram that still holds the
+  detector's timing response? (New in 0.11.0.)
 
 The whole chain runs on NumPy alone. Results are checked by automated
 tests against exact formulas, published measurements or a second
@@ -68,7 +73,7 @@ number that looks fine but is not.
 
 ## A short guide to the words used here
 
-- **Ground and excited manifold** -- the centre has a group of four
+- **Ground and excited manifold** -- the center has a group of four
   low-energy states (ground) and four states one optical photon higher
   (excited). In each group the four states form two pairs.
 - **Kramers doublet** -- one such pair. At zero magnetic field the two
@@ -78,12 +83,12 @@ number that looks fine but is not.
 - **Zero-field splitting** -- the energy gap between the two pairs of
   a manifold at zero field. It comes from **spin-orbit coupling**
   (`lam`, a property of the atom) and **strain** (`ups`, how the
-  crystal around the centre is squeezed; it varies from sample to
+  crystal around the center is squeezed; it varies from sample to
   sample). The two combine as `sqrt(lam^2 + 4 ups^2)`.
 - **Spin Hamiltonian** -- the 4 x 4 matrix whose eigenvalues are the
   energies of one manifold. `vacspin` builds it from spin-orbit
   coupling, strain and the magnetic field (the Zeeman terms).
-- **Symmetry axis** -- each centre points along one of diamond's
+- **Symmetry axis** -- each center points along one of diamond's
   `<111>` crystal directions. Its angles in your lab frame are
   `theta_rad` and `phi_rad`.
 - **Transition strength** -- how strongly light drives one
@@ -99,7 +104,7 @@ number that looks fine but is not.
 - **Emission budget** -- where the light from a decay goes. The
   **lifetime** is how long the excited state lasts; the **quantum
   efficiency** is the share of decays that give light at all; the
-  **zero-phonon line** (ZPL) is the sharp colour emitted without
+  **zero-phonon line** (ZPL) is the sharp color emitted without
   shaking the crystal, and the **Debye-Waller factor** is the share of
   the light in it; the **branching ratio** is the share of that light on
   the one transition the cavity is tuned to. Their product is the
@@ -110,9 +115,9 @@ number that looks fine but is not.
   **mode volume** `V`.
 - **Cavity linewidth** (`kappa`) and **coupling rate** (`g`) -- `kappa`
   is how fast light leaks out of the cavity, given as a frequency width
-  `f_cav / Q`; `g` is how fast the centre and the cavity trade energy.
+  `f_cav / Q`; `g` is how fast the center and the cavity trade energy.
   In the **bad-cavity, weak-coupling** regime this package covers, both
-  `g` and the centre's own decay are much slower than `kappa`, so the
+  `g` and the center's own decay are much slower than `kappa`, so the
   cavity simply speeds up the emission. The **cooperativity**
   `C = 4 g^2 / (kappa gamma)` measures the same speed-up; here it equals
   the Purcell factor minus one, times the radiative fraction. The
@@ -150,7 +155,7 @@ Units and conventions (each function's docstring states its own):
   energies, qubit frequency, splittings, Rabi rates and fitted
   observables.
 - **Magnetic fields in tesla**, as `(Bx, By, Bz)` vectors in your
-  **lab frame**. The package rotates them into the centre's own frame
+  **lab frame**. The package rotates them into the center's own frame
   using `theta_rad` and `phi_rad`. `field_on_circle(angle_deg, B)`
   gives a field of size `B` at an angle in degrees in the lab x-z
   plane (or the x-y or y-z plane).
@@ -167,9 +172,10 @@ Units and conventions (each function's docstring states its own):
 ## Examples
 
 Each example below runs as written, and the output shown is what it
-printed with vacspin 0.10.0. Examples 1 to 7 print the same as with
-0.6.0 to 0.9.0, and example 8 the same as with 0.9.0. The cavity, detector, attempt-rate and
-noise values are illustrative, not a recommended design; the centre's
+printed with vacspin 0.11.0. Examples 1 to 9 print the same as with
+0.10.0 (examples 1 to 7 also the same as with 0.6.0 to 0.9.0, and
+example 8 the same as with 0.9.0). The cavity, detector, attempt-rate and
+noise values are illustrative, not a recommended design; the center's
 parameters come from the cited sets described in
 [Cited parameter sets](#cited-parameter-sets).
 
@@ -277,9 +283,9 @@ companion study reported that number (about 65 %);
 design point (`Q_L = 870`, about 32 %), which
 `tests/test_revised_study.py` checks.
 
-`xi_pol` and `xi_pos` say how well the centre's dipole lines up with
+`xi_pol` and `xi_pos` say how well the center's dipole lines up with
 the cavity field in direction and position (each from 0 to 1);
-`xi_pol_overlap()` gives 2/3 for a centre in a `<100>`-oriented
+`xi_pol_overlap()` gives 2/3 for a center in a `<100>`-oriented
 diamond film. `eta` multiplies every loss from the emitter to the
 detector: the share of emission into the cavity mode (`beta`), the
 out-coupling port, the link, the chip and the detector.
@@ -409,7 +415,7 @@ communication times, so you supply it; the package does not guess it.
 ### 5. Your sample, your numbers: plan, measure, fit
 
 Every sample is strained differently, so the numbers that describe
-your centre should come from your own measurements. The `lab` tools
+your center should come from your own measurements. The `lab` tools
 work in the order a lab does: plan, measure, then calibrate.
 
 ```python
@@ -821,6 +827,120 @@ Some limits of what the histograms can tell:
   refuses and says to hold the share at 0.
 - `prep_error_dark` needs a dark histogram.
 
+### 10. A spin that turns bright and dark more than once (new in 0.11.0)
+
+The readout model of examples 2 and 3 takes two shortcuts: a bright
+spin that has turned dark stays dark, and a dark spin turns bright at
+most once and keeps giving its leak counts for the whole window.
+`repeated_flips=True` drops both. The spin is then a two-state jump
+process for the whole window: while bright it gives
+counts at `eta R` and turns dark at `R / (Lambda + 1)`; while dark it
+gives leak counts at `eta leak R` and turns bright at
+`leak R Lambda / (Lambda + 1)`, as often as that happens. `t1_s` adds
+spin relaxation in the ground state.
+
+```python
+import vacspin as vs
+
+gamma = vs.snv_emission().gamma0       # optical decay rate, 1/s
+kw = dict(s=10.0, noise_rate=0.2 / 50e-6)
+
+# Example 3's confocal readout, with a small leak (1e-4)
+for flips in (False, True):
+    out = vs.fidelity(0.002, 2244.0, gamma, 50e-6, leak=1e-4,
+                      repeated_flips=flips, **kw)
+    print(f"repeated_flips={flips}: fidelity {out['fidelity']:.4f}, "
+          f"mean counts bright {out['n_bright_total']:.2f}, "
+          f"dark {out['n_dark_total']:.2f}")
+
+# Spin relaxation: T1 = 1 ms and 100 us, no leak
+for t1 in (1e-3, 100e-6):
+    out = vs.fidelity(0.002, 2244.0, gamma, 50e-6, repeated_flips=True,
+                      t1_s=t1, **kw)
+    print(f"T1 = {t1 * 1e6:.0f} us: fidelity {out['fidelity']:.4f}")
+
+# With T1 the best window moves; compare with no relaxation
+best = vs.optimal_window(0.002, 2244.0, gamma, **kw)
+best_t1 = vs.optimal_window(0.002, 2244.0, gamma, repeated_flips=True,
+                            t1_s=100e-6, **kw)
+print(f"best window: {best['tau'] * 1e6:.1f} us ({best['fidelity']:.4f}); "
+      f"with T1 = 100 us: {best_t1['tau'] * 1e6:.1f} us "
+      f"({best_t1['fidelity']:.4f})")
+```
+
+```
+repeated_flips=False: fidelity 0.7217, mean counts bright 4.22, dark 1.33
+repeated_flips=True: fidelity 0.7521, mean counts bright 4.86, dark 1.42
+T1 = 1000 us: fidelity 0.8350
+T1 = 100 us: fidelity 0.7884
+best window: 16.8 us (0.8763); with T1 = 100 us: 14.0 us (0.8544)
+```
+
+The leak turns a dark spin bright about 10^4 times per second here, so
+in a 50 us window a bright spin that has turned dark often turns bright
+again. That raises its mean count from 4.22 to 4.86 and the fidelity
+from 0.722 to 0.752. The test suite simulates the jump process shot by
+shot (400 000 shots per spin state): the simulated fidelity lies 1.1
+standard errors from 0.752 and 40 from 0.722. Without leak the two
+models give the same distributions.
+
+The T1 values are illustrative; use the one measured for your sample.
+Relaxation turns the ground-state spin over at `1 / (2 T1)` in each
+direction, so a dark spin can relax into the bright state during the
+window, and the best window gets shorter. Equal rates in both
+directions hold when the temperature is well above `h f_q / k_B`
+(0.18 K for a 3.7 GHz qubit). `fidelity_four_level` takes the same
+`t1_s`.
+
+### 11. A lifetime with the detector's timing response (new in 0.11.0)
+
+The lifetime tutorial fits only the tail of the decay, after the
+excitation pulse and the detector's timing response (`t_start`). With
+the response measured on the same bins,
+`fit_lifetime_histogram(..., irf=...)` fits the whole histogram: the
+model is the decay convolved with the response.
+
+```python
+import numpy as np
+import vacspin as vs
+
+# Stand-in data: a 0.62 ns lifetime measured with a detector whose
+# timing response is a 60 ps (1 sigma) Gaussian centered at 1 ns;
+# 16 ps bins over 10 ns, 8000 decays and 500 background counts.
+rng = np.random.default_rng(0)
+edges = np.arange(626) * 16e-12
+t = rng.normal(1e-9, 60e-12, 8000) + rng.exponential(0.62e-9, 8000)
+b = rng.uniform(0.0, edges[-1], 500)
+counts = np.histogram(np.concatenate([t, b]), edges)[0]
+
+# The response, measured on the same bins (here: 20000 laser photons
+# scattered straight into the detector)
+irf = np.histogram(rng.normal(1e-9, 60e-12, 20000), edges)[0]
+
+fit = vs.fit_lifetime_histogram(counts, edges, irf=irf)
+print(f"with the response:  {fit.tau_s * 1e9:.4f} +/- "
+      f"{fit.sigma_tau_s * 1e9:.4f} ns, p = {fit.p_value:.2f}")
+tail = vs.fit_lifetime_histogram(counts, edges, t_start=1.5e-9)
+print(f"tail from 1.5 ns:   {tail.tau_s * 1e9:.4f} +/- "
+      f"{tail.sigma_tau_s * 1e9:.4f} ns, p = {tail.p_value:.2f}")
+```
+
+```
+with the response:  0.6181 +/- 0.0079 ns, p = 0.85
+tail from 1.5 ns:   0.6137 +/- 0.0127 ns, p = 0.81
+```
+
+Both fits find the simulated 0.62 ns within their error bars. The
+error bar of the fit with the response is about 40 % smaller, because
+it also uses the counts of the rise and of the first half nanosecond
+of the decay.
+The response is taken as constant within each bin, and the expected
+counts are then exact; for a smooth 40 ps Gaussian response in 16 ps
+bins this costs 3e-5 of the lifetime (`tests/test_lifetime_irf.py`).
+The response must be measured with the same timing as the decay: a
+time offset between the two is not fitted, and the noise of the
+measured response (here 20000 photons) is not part of the error bars.
+
 ## Tutorials
 
 Three scripts in the `examples/` folder of the repository (and, since
@@ -958,12 +1078,12 @@ For SiV- and GeV- the default orientation is the `<111>` axis of a
 No emission budget ships for SiV- or GeV-; build an `EmissionBudget`
 from your own cited numbers.
 
-The lead-vacancy (PbV-) centre is documented but not shipped, on
+The lead-vacancy (PbV-) center is documented but not shipped, on
 purpose: its ground splitting is measured (about 3900 GHz; Wang et
 al., ACS Photonics 8, 2947 (2021), confirmed by Chen et al.,
 arXiv:2605.27841 (2026)), but no verified measured excited-state
 splitting was available, and this package does not ship half a
-parameter set. For PbV-, or your own sample of any centre, fill in
+parameter set. For PbV-, or your own sample of any center, fill in
 `SpinParameters` and `EmissionBudget` from your measurements or the
 literature; the provenance travels with every prediction.
 
@@ -989,9 +1109,9 @@ gives its inputs, units and conventions.
 031022 (2023), Appendix B)
 
 - `h_manifold` -- the 4 x 4 Hamiltonian of one manifold (spin-orbit +
-  strain + spin and orbital Zeeman), with the field in the centre's
+  strain + spin and orbital Zeeman), with the field in the center's
   frame.
-- `lab_to_spin` -- rotates a lab-frame vector into the centre's frame.
+- `lab_to_spin` -- rotates a lab-frame vector into the center's frame.
 - `solve` -- energies and eigenvectors of both manifolds at a
   lab-frame field; `strain_scale` multiplies the strain (a
   strain-tuning knob).
@@ -1079,9 +1199,16 @@ Appendix A)
   0.8.0 it also returns `error_bright` (the chance that a bright shot
   gives fewer counts than the threshold) and `error_dark` (the chance
   that a dark shot reaches it), and `threshold=N` gives the fidelity at
-  the threshold your experiment uses instead of the best one.
+  the threshold your experiment uses instead of the best one. Since
+  0.11.0 `repeated_flips=True` treats the spin as a two-state jump
+  process with any number of changes in the window (example 10), and
+  `t1_s` adds spin relaxation to it; the distributions then come from
+  the generating function of the jump process, inverted by a discrete
+  Fourier transform, and the two means are exact closed forms.
 - `required_efficiency`, `required_window` -- the smallest efficiency
-  or shortest window that reaches a target fidelity.
+  or shortest window that reaches a target fidelity. Like
+  `optimal_window`, both take `repeated_flips` and `t1_s` since
+  0.11.0.
 - `optimal_window` (new in 0.7.0) -- the window with the highest
   fidelity, when the fidelity rises and then falls again (background or
   leak). Returns the `fidelity` result at that window plus `tau`. It
@@ -1106,6 +1233,9 @@ four-level model of the revised source study)
 - `fidelity_four_level` -- the fidelity at the best (or a given)
   threshold from those distributions, with `n_bright`, `n_dark`,
   `error_bright`, `error_dark`, and the preparation factor `f0`.
+- Since 0.11.0 both take `t1_s`: ground-state spin relaxation, as
+  jumps between the two ground states at `1 / (2 T1)` each way that
+  emit no photon.
 
 **Remote entanglement** (`vacspin.remote`; Barrett and Kok, PRA 71,
 060310(R) (2005))
@@ -1157,7 +1287,9 @@ four-level model of the revised source study)
   pooling bins until each expects at least 5 counts). `t_start` fits
   only the bins after a given delay, to leave out the excitation pulse
   and the detector's timing response; `background=False` holds the
-  background at zero.
+  background at zero. Since 0.11.0 `irf=` takes the instrument
+  response measured on the same (equal) bins and fits the decay
+  convolved with it, so the whole histogram can be fitted (example 11).
 
 `__version__` gives the installed version.
 
@@ -1284,11 +1416,25 @@ four-level model of the revised source study)
   and finite;
 - in `poisson_pmf` and `geometric_pmf` (since 0.10.0): a `kmax` that
   is not a whole number of at least 0, and in `design_fields` an
-  `n_pick` that is not a whole number.
+  `n_pick` that is not a whole number;
+- in `fidelity`, `optimal_window`, `required_window` and
+  `required_efficiency` (since 0.11.0): `repeated_flips` that is not
+  True or False, a `t1_s` that is not a positive, finite time, a
+  `t1_s` without `repeated_flips=True`, and, with `repeated_flips=True`,
+  count distributions that could need more than 2^18 counts; in
+  `four_level_counts` and `fidelity_four_level`, a `t1_s` that is not a
+  positive, finite time;
+- in `fit_lifetime_histogram` (since 0.11.0): an `irf` that is not one
+  finite, non-negative number per bin with a positive sum, bins of
+  unequal width together with `irf`, and counts before the response
+  starts when the background is held at 0;
+- in `field_on_circle` (since 0.11.0): an angle that is not finite, or
+  a field size that is negative or not finite; and wherever a field is
+  given (since 0.11.0): a field that is not three numbers.
 
 ## How the results are checked
 
-199 automated tests run on every push and pull request, on Python 3.9,
+240 automated tests run on every push and pull request, on Python 3.9,
 3.10, 3.11, 3.12, 3.13 and 3.14, and once more on Python 3.10 with the
 oldest versions the package allows (NumPy 1.22.0, pytest 7.0.0). The
 numerical checks compare the package with an exact formula, a
@@ -1713,6 +1859,75 @@ since 0.5.0)
   the inverse (to 1e-6 relative) and the spread of 400000 sampled
   inputs (within 2 %, with the right correlation to 0.01).
 
+**The readout as a jump process, and spin relaxation** (since 0.11.0;
+`tests/test_jump_model.py`)
+
+- Exact limits: without leak the jump model gives the default model's
+  distributions, which come from a separate closed form (to 1e-13;
+  measured 1.4e-15), and the same fidelity and means; when both spin
+  states give counts at the same rate (`leak = 1`) the count is
+  Poisson however often the spin changes, with and without T1 (to
+  1e-13; measured 1.1e-15).
+- The closed-form means against an RK4 integration of the two-state
+  rate equations written in the test (to 1e-9; measured 1.2e-14), in
+  four cases with leak, two with T1.
+- The distributions against an RK4 integration of the
+  photon-number-resolved rate equations, also written in the test
+  (to 1e-9; measured 6e-14).
+- Simulation of the jump process, 400 000 shots per spin state in
+  three cases: the fidelity and both means within 5 standard errors
+  (measured: within 1.8). For example 10's leak of 1e-4 the simulation
+  lies 1.1 standard errors from the jump model and 40 from the default
+  model.
+- With T1 and no background or leak the fidelity has a peak, and
+  `optimal_window` finds it (no window of a 400-point scan does better);
+  `required_window` and `required_efficiency` return values that reach
+  the target in the jump model while 0.1 % less does not; a given
+  threshold returns the errors of the same distributions.
+- The four-level model with T1 against an RK4 integration of its
+  photon-number-resolved master equation with the relaxation jumps,
+  written in the test (to 1e-7; measured 8e-15), and against the
+  two-state jump model for a bright line with cyclicity 40 and
+  T1 = 2 us (bright mean within 1e-3, dark mean within 1e-2 at 1 us and
+  2e-3 at 3 and 20 us; measured 5e-4, 6e-3, 1.1e-3 and 2.6e-4: the
+  start-up of the optical cycle, which the rate model leaves out).
+  Without `t1_s` the four-level results are bit for bit the same.
+- The count range of the jump model: the real generating function
+  behind its Chernoff bound equals a separate matrix exponential (to
+  1e-12; measured 5e-15) and the Poisson closed form for equal count
+  rates; with four times the chosen range, less than 1e-10 lies beyond
+  it (measured 8e-13) in six cases; a 1 ms cavity window with about
+  9600 counts equals the default model without leak (to 1e-12;
+  measured 1.3e-16).
+
+**Lifetime with the instrument response** (since 0.11.0;
+`tests/test_lifetime_irf.py`)
+
+- The response kernel (a decay started at a time spread evenly over
+  one bin) equals brute-force averaging over 200000 start times (to
+  1e-10; measured 8e-16 to 5e-12), its slope equals central
+  differences (measured 1e-10 relative), and it sums to 1.
+- With the whole response in one bin, the fit from the next bin on
+  equals the plain fit there (lifetime, error bar and background to
+  1e-9; measured 1e-13), as it must: after that bin the model is a
+  plain exponential.
+- The exact expected histogram for a Gaussian-shaped response (built
+  with the brute-force kernel, scaled to 1e12 counts) returns the
+  lifetime, amplitude and background (to 1e-7; measured 2e-11, 9e-12
+  and 4e-10).
+- For a smooth Gaussian response (40 ps in 16 ps bins) the exact
+  expected counts (from the closed-form distribution of a Gaussian
+  start plus an exponential delay) give the lifetime to 3e-5; the
+  test allows 1e-3. A plain fit from 0 without the response is off by
+  200 %.
+- 200 simulated experiments with that response: pull mean -0.08,
+  spread 0.96 (allowed: within 0.25 and 15 %), 98 % of p-values above
+  0.01.
+- Decay left over from 60 earlier pulses (period 5 ns, about 8
+  lifetimes) leaves the plain fit's lifetime unchanged (to 1e-8;
+  measured 9e-12) and raises the amplitude by exactly
+  `1 / (1 - e^(-T / tau))` (measured 2e-14).
+
 **Inputs**
 
 - NaN and infinite values are refused across the parameter classes,
@@ -1724,8 +1939,23 @@ since 0.5.0)
   number is refused; a dark histogram with counts and no background in
   the model is named as the cause; and the reference of a spin fit
   records a `strain_scale` other than 1.
+- Since 0.11.0 (`tests/test_fixes_0_11_0.py`): `field_on_circle`
+  refuses a NaN or infinite angle and a negative or non-finite size,
+  and a field that is not three numbers is refused with a message that
+  says so (a (3, 1) column still works, with the same result).
 
 ## Corrections in earlier versions
+
+**0.11.0 refuses two kinds of malformed field input.** No result
+changes.
+
+- `field_on_circle` returned `[nan, 0, nan]` for a NaN angle (which
+  failed only later, in the solver), and for a negative size a field
+  pointing the other way. It now refuses both, as `field_from_axis`
+  already did.
+- A field that is not three numbers stopped with NumPy's matmul error
+  (two or four components) or a `TypeError` (a 3 x 3 array). It is now
+  a `ValueError` that names the expected vector.
 
 **0.10.0 fixes five small problems.** None changes a result by more
 than 3 parts in 10^7.
@@ -1841,7 +2071,7 @@ changed answers in edge cases; every other result is unchanged.
   with a clear message. `required_window` returned 1 ns whenever the
   target was already reached at 1 ns; it now finds the shorter window.
 
-What changed in numbers: see the "Behaviour changes" note in
+What changed in numbers: see the "Behavior changes" note in
 [CHANGELOG.md](CHANGELOG.md). With no background and no leak every
 result is unchanged.
 
@@ -1879,13 +2109,23 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   thresholds are fixed factors: decay linewidth below a tenth of the
   cavity linewidth, `g` below a tenth of the cavity linewidth, and
   decay linewidth below a fifth of the qubit frequency.
-- **The readout model is a two-state counting model.** Both count
-  distributions are evaluated exactly within it, but it leaves out
-  some second-order effects: once a bright spin has flipped to dark
-  it produces no leak counts and cannot switch back on, and a dark
-  spin's leak counts are counted for the whole window even after it
-  has switched on (the leak is small whenever the readout is good).
-  The `nt_switch` argument of `fidelity` is ignored since 0.4.0.
+- **The default readout model takes two shortcuts.** Both count
+  distributions are evaluated exactly within it, but once a bright
+  spin has flipped to dark it produces no leak counts and cannot
+  switch back on, and a dark spin's leak counts are counted for the
+  whole window even after it has switched on. Since 0.11.0
+  `repeated_flips=True` removes both (example 10). The difference is
+  not always small: for example 3's confocal readout with
+  `leak = 1e-4` the default gives 0.722 and the jump model 0.752,
+  which a simulation confirms. Use `repeated_flips=True` when there is
+  leak and the window holds spin flips. Without leak both give the
+  same result. The jump model refuses a window whose mean count is
+  near 10^4 or more (its count range, set by a Chernoff bound, stops at
+  2^18), where the default model still works; with a bright cavity
+  readout, give `optimal_window` a `tau_max` that keeps the counts
+  below that. `fit_readout_histograms` uses the default model, which
+  is the same as the jump model for its default `leak = 0`. The
+  `nt_switch` argument of `fidelity` is ignored since 0.4.0.
 - **Leak counts belong to the dark spin only.** In `fidelity` the
   bright spin gets the background (`noise_rate`) but no `leak`
   counts, because the leak is off-resonant scattering of the dark
@@ -1913,9 +2153,10 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   cavity linewidth far above the C-line splittings (a few GHz). The
   laser couples to each line with a real, positive Rabi frequency
   scaled by its polarization-summed strength (no dipole phases or
-  per-line polarization), as in the source study. It leaves out
-  ground-state spin relaxation (T1) and charge-state jumps, and it
-  always calls the spin prepared in `|dn>` bright. Its cost grows with
+  per-line polarization), as in the source study. Since 0.11.0 it can
+  include ground-state spin relaxation (`t1_s`); it leaves out
+  charge-state jumps, and it always calls the spin prepared in `|dn>`
+  bright. Its cost grows with
   the counts: a window that could hold more than 65536 counts is
   refused, and a 100 ns window at the study's design point takes about
   0.1 s. Spectral diffusion multiplies the cost by the number of grid
@@ -1924,8 +2165,11 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
 - **The measured cyclicity near alignment depends on alignment.** At
   the nominal angles the model gives a much lower cyclicity than the
   measured 2244; see example 1.
-- **Spin coherence times** (T1, T2) are sample-dependent measurements
-  and are not part of the model.
+- **Spin coherence times.** Since 0.11.0 the spin relaxation time T1
+  is an input of both readout models (`t1_s`), with equal rates in
+  both directions, which needs a temperature well above `h f_q / k_B`.
+  Its value is a measurement of your sample; none ships. The coherence
+  time T2 is not part of any model here.
 - **SiV- and GeV- ship without strain, quenching or emission budget**;
   supply or fit your own.
 - **The readout calibration** (`fit_readout_histograms`) holds
@@ -1950,13 +2194,19 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
   quantity curves (or reaches a boundary such as zero strain), sample
   the fit's uncertainty instead.
 - **Lifetime fits** (`fit_lifetime_histogram`, since 0.8.0) fit one
-  exponential decay plus a constant background. They do not
-  deconvolve the instrument response (start the fit after it with
-  `t_start`), and they assume that each bin count is Poisson (no
-  pile-up: keep the detection probability per pulse small) and that
-  each decay ends within the pulse period. The error bars are
-  large-sample error bars. Two lifetimes, or a background that is not
-  flat, show up as a small `p_value`.
+  exponential decay plus a constant background. Without `irf` they do
+  not model the instrument response (start the fit after it with
+  `t_start`). With `irf` (since 0.11.0) the response is taken as
+  constant within each bin, must share the decay's timing (an offset
+  between the two is not fitted), and its own noise is not carried
+  into the error bars. They assume that each bin count is Poisson (no
+  pile-up: keep the detection probability per pulse small). Decay left
+  over from earlier pulses does not change the plain fit's lifetime as
+  long as the fitted bins lie within one pulse period (it only adds to
+  `amplitude`; tested); with `irf` it should be negligible at the start
+  of the histogram. The error bars are large-sample error bars. Two
+  lifetimes, or a background that is not flat, show up as a small
+  `p_value`.
 - **`purcell_from_lifetimes`** (since 0.8.0) reads the whole
   shortening of the lifetime as Purcell enhancement on the coupled
   line, or, with `include_d_line=True` (since 0.10.0), on the coupled
@@ -1976,9 +2226,9 @@ The full history is in [CHANGELOG.md](CHANGELOG.md).
 ## Where it comes from
 
 `vacspin` is the general-purpose engine distilled from the
-SnV-on-TFLN (tin-vacancy centre on thin-film lithium niobate) interface
-study below, and generalised to any group-IV
-colour centre and any cavity. The study's repository holds the device
+SnV-on-TFLN (tin-vacancy center on thin-film lithium niobate) interface
+study below, and generalized to any group-IV
+color center and any cavity. The study's repository holds the device
 design (FEM/EME/GME electromagnetic simulations) and reproduces the specific study.
 
 > T. M. Mahim, M. M. Rahman and A. S. M. Mohsin, "Fast single-shot

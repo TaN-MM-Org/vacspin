@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vacspin"
-version = "0.10.0"
-description = "Group-IV colour-centre spin-photon interfaces: strained spin Hamiltonians, cyclicity, transition-resolved Purcell budgets and exact single-shot readout statistics"
+version = "0.11.0"
+description = "Group-IV color-center spin-photon interfaces: strained spin Hamiltonians, cyclicity, transition-resolved Purcell budgets and exact single-shot readout statistics"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

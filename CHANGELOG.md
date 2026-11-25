@@ -4,6 +4,138 @@ Every physical claim added in any release is pinned by a test against
 an exact result, a published measurement, or two independent code
 paths; the release notes on GitHub carry the full anchor lists.
 
+## 0.11.0 (2026-11-25)
+
+The readout as a full jump process with spin relaxation, spin
+relaxation in the four-level model, lifetime fits with a measured
+instrument response, and two input fixes. Every result of 0.10.0 is
+unchanged, and no number printed in the README or the tutorials
+changes.
+
+### Added
+
+- `fidelity(..., repeated_flips=True)`: the spin as a two-state jump
+  process for the whole window. While bright it gives counts at eta R
+  and turns dark at R / (Lambda + 1); while dark it gives leak counts
+  at eta leak R and turns bright at leak R Lambda / (Lambda + 1), any
+  number of times. This removes the two shortcuts of the default model
+  (a bright spin that has turned dark stays dark and gives no leak
+  counts; a dark spin turns bright at most once and keeps its leak
+  counts). The distributions come from the generating function of the
+  jump process, 2 x 2 and in closed form, inverted by a discrete
+  Fourier transform over a count range set by a Chernoff bound on that
+  generating function (less than 1e-10 left beyond it, so the fidelity
+  is within 1e-9 as before); the means are closed forms. A window whose
+  mean count is near 10^4 or more is refused (the bound needs room for
+  about 27 times the mean of a bright record that ends in a flip, and
+  the range stops at 2^18), where the default model still works. The
+  default (False) is unchanged. For example 3's confocal readout with
+  leak = 1e-4 the default gives 0.722 and the jump model 0.752; a
+  simulation of the jump process lands 1.1 standard errors from 0.752
+  and 40 from 0.722.
+- `fidelity(..., t1_s=...)` (with `repeated_flips=True`): ground-state
+  spin relaxation, 1 / (2 T1) in each direction. The driven bright spin
+  is in its ground state only for the share 1 - s / (2 (1 + s)) of the
+  time, so its relaxation rate is scaled by that share, which makes the
+  model agree with the four-level model. Equal rates hold well above
+  h f_q / k_B (0.18 K for a 3.7 GHz qubit).
+- `optimal_window`, `required_window` and `required_efficiency` take
+  `repeated_flips` and `t1_s` and pass them to `fidelity`. With T1 the
+  fidelity has a peak even without background or leak.
+- `four_level_counts(..., t1_s=...)` and `fidelity_four_level(...,
+  t1_s=...)`: relaxation jumps |dn> <-> |up> at 1 / (2 T1) each way,
+  which emit no photon. Without `t1_s` every result is bit for bit the
+  same.
+- `fit_lifetime_histogram(..., irf=...)`: fits the decay convolved with
+  a measured instrument response on the same (equal) bins. The response
+  is taken as constant within each bin, and the expected counts are
+  then exact: the share of a decay started evenly over one bin that
+  falls in bin j is 1 - phi(y) for j = 0 and
+  phi(y) (1 - e^-y) e^(-(j - 1) y) after, with y = w / tau and
+  phi(y) = (1 - e^-y) / y. `amplitude` is then the total number of
+  decay counts. A time offset between response and decay is not
+  fitted.
+- README example 10 (the jump model and T1 on the confocal readout)
+  and example 11 (a lifetime fitted with and without the response).
+
+### Changed
+
+- Documentation: the plain lifetime fit is not biased by decay left
+  over from earlier pulses as long as the fitted bins lie within one
+  pulse period: that leftover has the same exponential shape and only
+  adds A e^(-T / tau) / (1 - e^(-T / tau)) to `amplitude`. 0.10.0 listed
+  it as not modeled. Test: `test_leftover_decay_from_earlier_pulses`.
+- README: the intro, examples 10 and 11, the package overview, the
+  refusals, the checks, a 0.11.0 correction note and "Limits" (the size
+  of the default model's shortcuts, T1 now an input, the lifetime fit
+  with a response); the test count (now 240; 0.10.0 had 199).
+
+### Fixed
+
+- `field_on_circle` returned [nan, 0, nan] for a NaN angle and, for a
+  negative size, the field pointing the other way. It now refuses a
+  non-finite angle and a negative or non-finite size, as
+  `field_from_axis` does. Test:
+  `test_field_on_circle_refuses_bad_inputs`.
+- A field that is not three numbers stopped with NumPy's matmul error
+  (two or four components) or a `TypeError` (a 3 x 3 array) in
+  `solve`, `qubit_frequency`, `cyclicity`, `transition_table`, `c_line`
+  and `rabi_rate` (static and drive field). It is now a `ValueError`
+  that names the expected vector; a (3, 1) column still works and gives
+  the same result. Test: `test_field_must_hold_three_numbers`.
+
+### Not included
+
+- The jump model in `fit_readout_histograms`. A likelihood needs every
+  probability to keep its relative accuracy far in the tails, and the
+  Fourier inversion gives only absolute accuracy (about 1e-16). The fit
+  keeps the default model, which is the same for its default leak = 0.
+- Unequal relaxation rates (spin relaxation at temperatures near or
+  below h f_q / k_B, where it mostly goes one way), and the coherence
+  time T2: no model here uses them.
+- A fitted time offset between the instrument response and the decay,
+  and the noise of a measured response in the error bars.
+- Pile-up corrections in lifetime fits, charge-state jumps in the
+  four-level model, the strong-coupling regime, emission budgets for
+  SiV- and GeV-, and a PbV- parameter set: each needs a model or a
+  source this release does not have.
+
+### Checks (tests)
+
+- `tests/test_jump_model.py` (32 tests). Jump model: without leak it
+  equals the default model's separate closed form (1e-13; measured
+  1.4e-15); with equal count rates in both states (leak = 1) it is
+  Poisson, with and without T1 (1e-13; measured 1.1e-15); the closed-form
+  means equal an RK4 integration of the rate equations (1e-9; measured
+  1.2e-14); the distributions equal an RK4 integration of the
+  photon-number-resolved rate equations (1e-9; measured 6e-14); a
+  simulation of 400 000 shots per state matches the fidelity and the
+  means within 5 standard errors (measured 1.8) in three cases; with T1
+  `optimal_window` finds the peak of a 400-point scan; the search
+  functions reach their targets. Four-level model with T1: an RK4
+  integration of its master equation with relaxation jumps (1e-7;
+  measured 8e-15), and the two-state jump model for a cyclicity-40 line
+  with T1 = 2 us (bright mean 1e-3, dark mean 1e-2 at 1 us and 2e-3
+  after; measured 5e-4, 6e-3, 1.1e-3, 2.6e-4). The count range: the
+  real generating function behind its Chernoff bound against a separate
+  matrix exponential (1e-12; measured 5e-15); with four times the range,
+  less than 1e-10 lies beyond it (measured 8e-13) in six cases; a 1 ms
+  window with about 9600 counts equals the default model without leak
+  (1e-12; measured 1.3e-16).
+- `tests/test_lifetime_irf.py` (7 tests): the response kernel against
+  brute-force averaging over 200000 start times (1e-10; measured 8e-16
+  to 5e-12) and its slope against central differences (measured 1e-10);
+  a one-bin response equals the plain fit from the next bin (1e-9;
+  measured 1e-13); the exact expected histogram returns lifetime,
+  amplitude and background (1e-7; measured 2e-11, 9e-12, 4e-10); a
+  smooth Gaussian response, from the closed-form distribution of a
+  Gaussian start plus an exponential delay, costs 3e-5 of the lifetime
+  (allowed 1e-3); 200 simulated experiments give pull mean -0.08 and
+  spread 0.96; decay left over from 60 earlier pulses leaves the
+  lifetime unchanged (1e-8; measured 9e-12).
+- `tests/test_fixes_0_11_0.py` (2 tests): the two fixes above; both
+  fail with 0.10.0.
+
 ## 0.10.0 (2026-11-10)
 
 Failed spin preparations in the readout calibration, the D line in the
@@ -608,7 +740,7 @@ faster.
   computed in closed form (a Poisson tail, or a stable recurrence
   when the switch-on rate is fast), then convolved with the
   background. Tests: direct double numerical integration (1e-6 per
-  value), normalisation (1e-12), closed-form mean (1e-9 relative),
+  value), normalization (1e-12), closed-form mean (1e-9 relative),
   and 400 000-shot Monte Carlo of the counting process in three
   cases (within 5 standard errors).
 - The mean bright count eta (Lambda + 1)(1 - exp(-Gp tau)) lost
@@ -657,7 +789,7 @@ faster.
   the whole dark mean, leak included, to the bright mean. With
   leak > 0 they differ by exactly eta leak R tau.
 
-### Behaviour changes
+### Behavior changes
 
 With `noise_rate = 0` and `leak = 0` the two distributions reduce to
 the 0.3.1 ones (the background convolution is with a point mass at
@@ -750,7 +882,7 @@ rewritten README.
   terms, units and conventions, six runnable examples with their exact
   output, every public name, the refusals, and each test's real
   tolerance.
-- Docstrings: `vacspin.params` said "Two sets ship" (three centres
+- Docstrings: `vacspin.params` said "Two sets ship" (three centers
   ship); the `vacspin.readout` module docstring gave the geometric
   limit's mean as eta Lambda, while the code and test use
   eta (Lambda + 1).
@@ -779,9 +911,9 @@ rewritten README.
 
 ## v0.3.0 - 2026-09-18
 
-The third measured centre, and a future-proofing pass.
+The third measured center, and a future-proofing pass.
 
-- `gev_bhaskar2017()`: the germanium-vacancy centre with its
+- `gev_bhaskar2017()`: the germanium-vacancy center with its
   measured unstrained orbital splittings -- 152 GHz ground, 981 GHz
   excited, zero-phonon line 602 nm (Bhaskar et al., PRL 118, 223603
   (2017)) -- shipping, as for SiV-, only what its source states:
@@ -799,7 +931,7 @@ The third measured centre, and a future-proofing pass.
 - Anchors: GeV values locked to their source; the zero-strain
   closed form Delta = lam exact for both manifolds through the full
   solver; the dipole sum rule and the exact aligned-field
-  protection hold for the new centre.
+  protection hold for the new center.
 
 ## v0.2.0 - 2026-09-17
 
@@ -836,7 +968,7 @@ determine them at all.
 
 First release: the general-purpose engine distilled from the
 SnV-on-TFLN interface study (Mahim, Rahman and Mohsin, submitted to
-Optics Express, 2026), generalized to any group-IV colour centre and
+Optics Express, 2026), generalized to any group-IV color center and
 any cavity.
 
 - `hamiltonian`: the shared group-IV effective Hamiltonian (spin-orbit
